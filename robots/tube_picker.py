@@ -11,7 +11,7 @@ import one.utils.constant as ouc
 import one.scene.scene_object_primitive as ossop
 import one.robots.manipulators.denso.cvr038 as ormdc
 
-from riken.grippers.cvr038_4tb_gripper import CVR0384TBGripper
+from coripps.grippers.cvr038_4tb_gripper import CVR0384TBGripper
 
 
 class TubePicker(ormdc.CVR038):

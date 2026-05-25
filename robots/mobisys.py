@@ -13,8 +13,8 @@ import one.utils.constant as ouc
 import one.utils.math as oum
 import one.viewer.world as ovw
 
-from riken.robots.leaf_sampler import LeafSampler
-from riken.robots.tube_picker import TubePicker
+from coripps.robots.leaf_sampler import LeafSampler
+from coripps.robots.tube_picker import TubePicker
 
 
 _RIKEN_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

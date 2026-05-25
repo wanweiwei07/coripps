@@ -14,7 +14,7 @@ import one.scene.scene_object as osso
 import one.scene.scene_object_primitive as ossop
 import one.viewer.world as ovw
 
-from riken.robots.mobisys import mobisys
+from coripps.robots.mobisys import mobisys
 
 
 _RIKEN_DIR = os.path.dirname(os.path.abspath(__file__))
