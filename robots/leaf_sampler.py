@@ -21,7 +21,7 @@ _D405_PATH = os.path.join(_RIKEN_DIR, 'models', 'd405.stl')
 _D405_POS_J5 = np.array([-0.0245, -0.0445, 0.0235], dtype=np.float32)
 _D405_ROTMAT_J5 = np.eye(3, dtype=np.float32)
 _D405_TF_J5 = oum.tf_from_rotmat_pos(_D405_ROTMAT_J5, _D405_POS_J5)
-_D405_FRAME_POS_D405 = np.array([-0.036042, -0.000657, -0.0105], dtype=np.float32)
+_D405_FRAME_POS_D405 = np.array([-0.0361127, -0.012414, -0.0105], dtype=np.float32)
 _D405_FRAME_ROTMAT_D405 = (
     oum.rotmat_from_axangle(ouc.StandardAxis.Z, -np.pi / 4.0) @
     oum.rotmat_from_axangle(ouc.StandardAxis.X, np.pi / 2.0)
