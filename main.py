@@ -20,8 +20,6 @@ from coripps.robots.mobisys import mobisys
 _RIKEN_DIR = os.path.dirname(os.path.abspath(__file__))
 _TUBE_PATH = os.path.join(_RIKEN_DIR, 'models', 'tube.stl')
 _POT_PATH = os.path.join(_RIKEN_DIR, 'models', 'pot.stl')
-_TUBE_SCALE = (1e-3, 1e-3, 1e-3)
-_POT_SCALE = None
 _TUBE_ROTMAT = oum.rotmat_from_axangle(ouc.StandardAxis.Z, np.pi / 2.0)
 _POT_ROTMAT = np.eye(3, dtype=np.float32)
 _PLACE_TUBE_ROTMAT = oum.rotmat_from_axangle(ouc.StandardAxis.Z, np.pi / 2.0)
@@ -371,14 +369,12 @@ def show_tube_picker_points():
     ], dtype=bool)
     tube_template = osso.SceneObject.from_file(
         _TUBE_PATH,
-        scale=_TUBE_SCALE,
         collision_type=None,
         rgb=ouc.ExtendedColor.SILVER,
         alpha=0.5,
     )
     pot_template = osso.SceneObject.from_file(
         _POT_PATH,
-        scale=_POT_SCALE,
         collision_type=None,
         rgb=ouc.ExtendedColor.CHINESE_RED,
         alpha=0.85,

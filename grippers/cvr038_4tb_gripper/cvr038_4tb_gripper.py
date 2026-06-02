@@ -18,14 +18,12 @@ def prepare_ms():
     )
     lf_lnk = orbms.Link.from_file(
         os.path.join(mesh_dir, 'left_finger_4tb.stl'),
-        scale=(1e-3, 1e-3, 1e-3),
         loc_pos=np.array([0.0, 0.0, -0.06], dtype=np.float32),
         collision_type=ouc.CollisionType.MESH,
         rgb=ouc.ExtendedColor.STEEL_BLUE,
     )
     rf_lnk = orbms.Link.from_file(
         os.path.join(mesh_dir, 'right_finger_4tb.stl'),
-        scale=(1e-3, 1e-3, 1e-3),
         loc_pos=np.array([0.0, 0.0, -0.06], dtype=np.float32),
         collision_type=ouc.CollisionType.MESH,
         rgb=ouc.ExtendedColor.SALMON_PINK,
