@@ -4,6 +4,7 @@ import numpy as np
 import one.utils.constant as ouc
 import one.utils.math as oum
 import one.robots.base.mech_structure as orbms
+import one.robots.base.mech_base as orbmb
 import one.robots.end_effectors.ee_base as oreb
 
 
@@ -59,16 +60,17 @@ def prepare_ms():
     return structure
 
 
-class CVR0384TBGripper(oreb.EndEffectorBase, oreb.GripperMixin):
+class CVR0384TBGripper(orbmb.MechBase, oreb.GripperMixin):
 
     @classmethod
     def _build_structure(cls):
         return prepare_ms()
 
     def __init__(self):
-        super().__init__(
-            loc_tcp_tf=oum.tf_from_rotmat_pos(pos=(0.0, 0.0, 0.1045))
-        )
+        super().__init__()   # is_free=True default
+        self.add_tcp('grasp_center', self.runtime_root_lnk,
+                     oum.tf_from_rotmat_pos(pos=(0.0, 0.0, 0.1045)))
+        self.contact_pattern = np.zeros((1, 3), dtype=np.float32)
         self.jaw_range = np.array([0.0, 0.03], dtype=np.float32)
         self.open_dir = ouc.StandardAxis.Y
         self.set_jaw_width(self.jaw_range[1])
@@ -80,6 +82,7 @@ class CVR0384TBGripper(oreb.EndEffectorBase, oreb.GripperMixin):
 
     def clone(self):
         new = super().clone()
+        new.contact_pattern = self.contact_pattern.copy()
         new.jaw_range = self.jaw_range.copy()
         new.open_dir = self.open_dir
         new.set_jaw_width(self.qs[0] * 2.0)
@@ -97,9 +100,10 @@ if __name__ == '__main__':
     gripper.attach_to(base.scene)
     gripper.close()
     ossop.frame().attach_to(base.scene)
+    gc_tf = gripper.tcp('grasp_center').tf
     ossop.frame(
-        pos=gripper.gl_tcp_tf[:3, 3],
-        rotmat=gripper.gl_tcp_tf[:3, :3],
+        pos=gc_tf[:3, 3],
+        rotmat=gc_tf[:3, :3],
         color_mat=ouc.CoordColor.MYC,
     ).attach_to(base.scene)
     builtins.base = base

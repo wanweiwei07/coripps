@@ -21,7 +21,7 @@ class TubePicker(ormdc.CVR038):
         super().__init__(rotmat=rotmat, pos=pos)
         self.gripper = CVR0384TBGripper()
         self.gripper.set_jaw_width(jaw_width)
-        self.engage(self.gripper)
+        self.mount(self.gripper, self.runtime_lnks[-1], update=True)
 
     def toggle_joint_frames(self, length_scale=0.28, radius_scale=0.35,
                             color_mat=ouc.CoordColor.RGB):
@@ -33,7 +33,7 @@ class TubePicker(ormdc.CVR038):
             return None
 
         compiled = self.structure.compiled
-        joint_ids = self._main_chain.jnt_ids_in_structure
+        joint_ids = self.chain('main').jnt_ids_in_structure
         frames = []
         for jidx in joint_ids:
             parent_lidx = compiled.plidx_of_jidx[jidx]
@@ -67,7 +67,7 @@ if __name__ == '__main__':
     robot.attach_to(base.scene)
     robot.gripper.attach_to(base.scene)
     robot.toggle_joint_frames()
-    robot.toggle_tcp(color_mat=ouc.CoordColor.MYC)
+    robot.gripper.toggle_tcp('grasp_center', color_mat=ouc.CoordColor.MYC)
 
     builtins.base = base
     builtins.robot = robot

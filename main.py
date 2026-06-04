@@ -149,7 +149,8 @@ def diagnose_pose_sequence(robot, tcp_rotmat, point, pose_points_fn=tube_picker_
     qs_options = []
     for pose_idx, pose_point in enumerate(pose_points):
         try:
-            qs_list = robot.ik_tcp(
+            qs_list = robot.ik(
+                'main', robot.gripper.tcp('grasp_center'),
                 tgt_rotmat=tcp_rotmat,
                 tgt_pos=pose_point,
                 max_solutions=8,
@@ -300,12 +301,16 @@ def show_leaf_sampler_observations(scene, leaf_sampler, points):
     """Draw reachable/unreachable D405 observation points for leaf sampler."""
     results = []
     for idx, point in enumerate(points, start=1):
-        qs, info, ok = leaf_sampler.ik_attached_frame(
-            leaf_sampler.d405_frame,
-            target_pos=point,
+        sols, infos = leaf_sampler.ik_partial(
+            'to_j5', 'd405',
+            tgt_pos=point,
             axis_constraints={'z': np.array([0.0, 0.0, -1.0], dtype=np.float32)},
-            selik_seed_count=128,
+            seed_count=128,
+            return_infos=True,
         )
+        ok = len(sols) > 0
+        qs = sols[0] if ok else None
+        info = infos[0] if infos else None
         rgb = ouc.BasicColor.GREEN if ok else ouc.BasicColor.RED
         ossop.sphere(
             pos=point,
@@ -319,7 +324,7 @@ def show_leaf_sampler_observations(scene, leaf_sampler, points):
             sol_robot.fk(qs=qs)
             sol_robot.alpha = 0.5
             sol_robot.attach_to(scene)
-            sol_robot.toggle_attached_frames(
+            sol_robot.toggle_tcp(
                 'd405',
                 length_scale=0.25,
                 radius_scale=0.4,
@@ -341,9 +346,9 @@ def show_tube_picker_points():
     mobisys_base.attach_to(base.scene)
     tube_handler.attach_to(base.scene)
     tube_handler.gripper.attach_to(base.scene)
-    tube_handler.toggle_tcp(color_mat=ouc.CoordColor.MYC)
+    tube_handler.gripper.toggle_tcp('grasp_center', color_mat=ouc.CoordColor.MYC)
     leaf_sampler.attach_to(base.scene)
-    leaf_sampler.toggle_attached_frames(
+    leaf_sampler.toggle_tcp(
         'd405',
         length_scale=0.3,
         radius_scale=0.5,

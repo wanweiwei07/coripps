@@ -38,30 +38,18 @@ _OBS_ROBOT_POS = np.array([0.42, 0.025, 0.0], dtype=np.float32)
 
 
 def solve_d405_obs_all(robot, max_solutions=8, seed_count=2048):
-    frame = robot.d405_frame
-    chain = frame.chain
-    ref_qs = chain.extract_active_qs(robot.qs)
-    tgt_rotmat_hint = oum.rotmat_from_axis_constraints(
-        {'z': _OBS_TARGET_Z}, ref_rotmat=frame.rotmat)
-    sols, infos = frame.solver.ik_partial(
-        root_rotmat=robot.rotmat,
-        root_pos=robot.pos,
+    # partial IK: point the d405 frame's z axis at the target, roll free.
+    # 'to_j5' = the 5-joint chain (root -> j5 link); 'd405' = the camera frame.
+    sols, infos = robot.ik_partial(
+        'to_j5', 'd405',
         tgt_pos=_OBS_TARGET_POS,
         axis_constraints={'z': _OBS_TARGET_Z},
-        loc_tf=frame.loc_tf,
-        tgt_rotmat_hint=tgt_rotmat_hint,
         max_solutions=max_solutions,
-        ref_qs=ref_qs,
         seed_count=seed_count,
         return_infos=True,
-        pos_weight=1.0,
-        axis_weight=0.2,
-        tol_pos=1e-4,
-        tol_axis=1e-3,
     )
     solutions = []
-    for qs_active, info in zip(sols, infos):
-        full_qs = chain.embed_active_qs(qs_active, robot.qs)
+    for full_qs, info in zip(sols, infos):
         if any(np.linalg.norm(full_qs - prev_qs) <= 1e-2
                for prev_qs, _ in solutions):
             continue
@@ -83,20 +71,25 @@ class LeafSampler(ormdc.CVR038):
             rgb=ouc.ExtendedColor.SILVER_GRAY,
             alpha=1.0,
         )
-        self.attach_sensor(self.d405, self.j5_link, _D405_TF_J5)
-        self.d405_frame = self.define_attached_frame(
-            'd405', self.j5_link, _D405_FRAME_TF_J5)
+        # mount the sensor on the j5 link
+        self.mount(self.d405, self.j5_link, _D405_TF_J5, update=True)
+        # 5-joint chain (root -> j5 link) + the camera frame as a tcp
+        compiled = self.structure.compiled
+        jidx5 = self.chain('main').jnt_ids_in_structure[4]
+        j5_struct_lnk = self.structure.lnks[compiled.clidx_of_jidx[jidx5]]
+        self.add_chain('to_j5', compiled.root_lnk, j5_struct_lnk)
+        self.d405_frame = self.add_tcp('d405', self.j5_link, _D405_FRAME_TF_J5)
 
     @property
     def j5_link(self):
         """Return the runtime child link moved by joint 5."""
-        jidx5 = self._main_chain.jnt_ids_in_structure[4]
+        jidx5 = self.chain('main').jnt_ids_in_structure[4]
         child_lidx = self.structure.compiled.clidx_of_jidx[jidx5]
         return self.runtime_lnks[child_lidx]
 
     def clone(self):
         new = super().clone()
-        new.d405_frame = new.get_attached_frame('d405')
+        new.d405_frame = new.tcp('d405')
         return new
 
 
@@ -113,19 +106,23 @@ if __name__ == '__main__':
     ossop.frame().attach_to(base.scene)
 
     robot = LeafSampler(rotmat=_OBS_ROBOT_ROTMAT, pos=_OBS_ROBOT_POS)
-    qs, info, ok = robot.ik_attached_frame(
-        robot.d405_frame,
-        target_pos=_OBS_TARGET_POS,
+    sols, infos = robot.ik_partial(
+        'to_j5', 'd405',
+        tgt_pos=_OBS_TARGET_POS,
         axis_constraints={'z': _OBS_TARGET_Z},
-        selik_seed_count=128,
+        seed_count=128,
+        return_infos=True,
     )
+    ok = len(sols) > 0
+    qs = sols[0] if ok else None
+    info = infos[0] if infos else None
     if ok:
         robot.fk(qs=qs)
 
     robot.attach_to(base.scene)
     robot.alpha=0.3
-    robot.toggle_tcp(color_mat=ouc.CoordColor.MYC)
-    # kv = orbkv.KineVisualizer(robot, alpha=0.8)
+    robot.toggle_tcp('flange', color_mat=ouc.CoordColor.MYC)
+    # kv = orbkv.KineVisualizer(robot, chain=robot.chain('main'), alpha=0.8)
     # kv.attach_to(base.scene)
     ossop.frame_from_tf(
         robot.j5_link.tf,
@@ -133,7 +130,7 @@ if __name__ == '__main__':
         radius_scale=0.6,
         color_mat=ouc.CoordColor.DYO,
     ).attach_to(base.scene)
-    robot.toggle_attached_frames(
+    robot.toggle_tcp(
         'd405',
         length_scale=0.3,
         radius_scale=0.5,
@@ -170,7 +167,7 @@ if __name__ == '__main__':
     print('d405_frame tf:')
     print(robot.d405_frame.tf)
     j6_link = robot.runtime_lnks[robot.structure.compiled.clidx_of_jidx[
-        robot._main_chain.jnt_ids_in_structure[5]]]
+        robot.chain('main').jnt_ids_in_structure[5]]]
     j6_in_j5_tf = oum.tf_inverse(robot.j5_link.tf) @ j6_link.tf
     print('j6 pos in j5 frame:')
     print(j6_in_j5_tf[:3, 3])

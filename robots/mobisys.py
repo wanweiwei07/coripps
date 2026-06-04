@@ -56,9 +56,9 @@ if __name__ == '__main__':
     base_model.attach_to(world.scene)
     robot.attach_to(world.scene)
     robot.gripper.attach_to(world.scene)
-    robot.toggle_tcp(color_mat=ouc.CoordColor.MYC)
+    robot.gripper.toggle_tcp('grasp_center', color_mat=ouc.CoordColor.MYC)
     leaf_sampler.attach_to(world.scene)
-    leaf_sampler.toggle_attached_frames(
+    leaf_sampler.toggle_tcp(
         'd405',
         length_scale=0.3,
         radius_scale=0.5,
