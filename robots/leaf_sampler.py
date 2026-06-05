@@ -20,15 +20,15 @@ _RIKEN_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _D405_PATH = os.path.join(_RIKEN_DIR, 'models', 'd405.stl')
 _D405_POS_J5 = np.array([-0.0245, -0.0445, 0.0235], dtype=np.float32)
 _D405_ROTMAT_J5 = np.eye(3, dtype=np.float32)
-_D405_TF_J5 = oum.tf_from_rotmat_pos(_D405_ROTMAT_J5, _D405_POS_J5)
+_D405_TF_J5 = oum.tf_from_pos_rotmat(_D405_POS_J5, _D405_ROTMAT_J5)
 _D405_FRAME_POS_D405 = np.array([-0.0361127, -0.012414, -0.0105], dtype=np.float32)
 _D405_FRAME_ROTMAT_D405 = (
     oum.rotmat_from_axangle(ouc.StandardAxis.Z, -np.pi / 4.0) @
     oum.rotmat_from_axangle(ouc.StandardAxis.X, np.pi / 2.0)
 ).astype(np.float32)
-_D405_FRAME_TF_D405 = oum.tf_from_rotmat_pos(
-    _D405_FRAME_ROTMAT_D405,
+_D405_FRAME_TF_D405 = oum.tf_from_pos_rotmat(
     _D405_FRAME_POS_D405,
+    _D405_FRAME_ROTMAT_D405,
 )
 _D405_FRAME_TF_J5 = _D405_TF_J5 @ _D405_FRAME_TF_D405
 _OBS_TARGET_POS = np.array([0.580, -0.120, 0.127], dtype=np.float32)
@@ -41,9 +41,10 @@ def solve_d405_obs_all(robot, max_solutions=8, seed_count=2048):
     # partial IK: point the d405 frame's z axis at the target, roll free.
     # 'to_j5' = the 5-joint chain (root -> j5 link); 'd405' = the camera frame.
     sols, infos = robot.ik_partial(
-        'to_j5', 'd405',
         tgt_pos=_OBS_TARGET_POS,
         axis_constraints={'z': _OBS_TARGET_Z},
+        chain='to_j5',
+        tcp='d405',
         max_solutions=max_solutions,
         seed_count=seed_count,
         return_infos=True,
@@ -107,9 +108,10 @@ if __name__ == '__main__':
 
     robot = LeafSampler(rotmat=_OBS_ROBOT_ROTMAT, pos=_OBS_ROBOT_POS)
     sols, infos = robot.ik_partial(
-        'to_j5', 'd405',
         tgt_pos=_OBS_TARGET_POS,
         axis_constraints={'z': _OBS_TARGET_Z},
+        chain='to_j5',
+        tcp='d405',
         seed_count=128,
         return_infos=True,
     )
@@ -146,7 +148,7 @@ if __name__ == '__main__':
     target_rotmat = oum.rotmat_from_axis_constraints(
         {'z': _OBS_TARGET_Z}, ref_rotmat=robot.d405_frame.rotmat)
     ossop.frame_from_tf(
-        oum.tf_from_rotmat_pos(target_rotmat, _OBS_TARGET_POS),
+        oum.tf_from_pos_rotmat(_OBS_TARGET_POS, target_rotmat),
         length_scale=0.25,
         radius_scale=0.4,
         color_mat=ouc.CoordColor.RGB,

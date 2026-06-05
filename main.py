@@ -150,9 +150,9 @@ def diagnose_pose_sequence(robot, tcp_rotmat, point, pose_points_fn=tube_picker_
     for pose_idx, pose_point in enumerate(pose_points):
         try:
             qs_list = robot.ik(
-                'main', robot.gripper.tcp('grasp_center'),
-                tgt_rotmat=tcp_rotmat,
                 tgt_pos=pose_point,
+                tgt_rotmat=tcp_rotmat,
+                tcp=robot.gripper.tcp('grasp_center'),
                 max_solutions=8,
             )
         except IndexError:
@@ -302,9 +302,10 @@ def show_leaf_sampler_observations(scene, leaf_sampler, points):
     results = []
     for idx, point in enumerate(points, start=1):
         sols, infos = leaf_sampler.ik_partial(
-            'to_j5', 'd405',
             tgt_pos=point,
             axis_constraints={'z': np.array([0.0, 0.0, -1.0], dtype=np.float32)},
+            chain='to_j5',
+            tcp='d405',
             seed_count=128,
             return_infos=True,
         )
@@ -387,7 +388,7 @@ def show_tube_picker_points():
 
     for point in tube_points:
         tube = tube_template.clone()
-        tube.set_rotmat_pos(rotmat=_TUBE_ROTMAT, pos=point + _TUBE_POS_OFFSET)
+        tube.set_pos_rotmat(pos=point + _TUBE_POS_OFFSET, rotmat=_TUBE_ROTMAT)
         tube.attach_to(base.scene)
 
     for point in tube_points[tube_invalid_mask]:
@@ -410,7 +411,7 @@ def show_tube_picker_points():
 
     for pot_point in pot_points:
         pot = pot_template.clone()
-        pot.set_rotmat_pos(rotmat=_POT_ROTMAT, pos=pot_point)
+        pot.set_pos_rotmat(pos=pot_point, rotmat=_POT_ROTMAT)
         pot.attach_to(base.scene)
 
     cursor = ossop.sphere(
@@ -431,7 +432,7 @@ def show_tube_picker_points():
         pose_idx = state['pose_idx']
         pose_points = tube_picker_pose_points(tube_valid_points[point_idx])
         tube_handler.fk(qs=tube_valid_sequences[point_idx, pose_idx])
-        cursor.set_rotmat_pos(pos=pose_points[pose_idx])
+        cursor.set_pos_rotmat(pos=pose_points[pose_idx])
         print(
             f'tube point {point_idx + 1}/{len(tube_valid_points)} '
             f'pose {pose_idx + 1}/4 tcp={pose_points[pose_idx]}'

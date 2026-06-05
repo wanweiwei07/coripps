@@ -35,7 +35,7 @@ def mobisys():
         rgb=ouc.ExtendedColor.SILVER_GRAY,
         alpha=1.0,
     )
-    base_model.set_rotmat_pos(rotmat=_BASE_ROTMAT, pos=_BASE_POS)
+    base_model.set_pos_rotmat(pos=_BASE_POS, rotmat=_BASE_ROTMAT)
 
     tube_picker = TubePicker(rotmat=_TUBE_PICKER_ROTMAT, pos=_TUBE_PICKER_POS)
     leaf_sampler = LeafSampler(
