@@ -68,7 +68,7 @@ class LeafSampler(ormdc.CVR038):
         self.d405 = osso.SceneObject.from_file(
             _D405_PATH,
             collision_type=None,
-            is_free=True,
+            is_floating=True,
             rgb=ouc.ExtendedColor.SILVER_GRAY,
             alpha=1.0,
         )
