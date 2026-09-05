@@ -11,16 +11,19 @@ import one.utils.constant as ouc
 import one.scene.scene_object_primitive as ossop
 import one.robots.manipulators.denso.cvr038 as ormdc
 
-from coripps.grippers.cvr038_4tb_gripper import CVR0384TBGripper
+from coripps.grippers.xm430_rotary import XM430RotaryGripper
 
 
 class TubePicker(ormdc.CVR038):
-    """CVR038 arm with the Riken 4TB tube-picking gripper mounted."""
+    """CVR038 arm with the XM430 rotary tube-picking gripper mounted."""
 
-    def __init__(self, rotmat=None, pos=None, jaw_width=0.03):
+    def __init__(self, rotmat=None, pos=None, jaw_width=None):
         super().__init__(rotmat=rotmat, pos=pos)
-        self.gripper = CVR0384TBGripper()
-        self.gripper.set_jaw_width(jaw_width)
+        self.gripper = XM430RotaryGripper()
+        # the rotary jaw rests 4 mm apart and opens to ~43 mm, so 'fully open'
+        # is read off the gripper rather than hard-coded
+        self.gripper.set_opening(
+            self.gripper.jaw_range[1] if jaw_width is None else jaw_width)
         self.mount(self.gripper, self.runtime_lnks[-1], update=True)
 
     def toggle_joint_frames(self, length_scale=0.28, radius_scale=0.35,
@@ -50,7 +53,7 @@ class TubePicker(ormdc.CVR038):
         return [frame for frame, _ in frames]
 
 
-def tube_picker(rotmat=None, pos=None, jaw_width=0.03):
+def tube_picker(rotmat=None, pos=None, jaw_width=None):
     """Return a TubePicker robot."""
     return TubePicker(rotmat=rotmat, pos=pos, jaw_width=jaw_width)
 

@@ -29,7 +29,7 @@ _POT_OBSERVE_TCP_ROTMAT = _PLACE_TCP_ROTMAT @ oum.rotmat_from_axangle(
     ouc.StandardAxis.Z, -np.pi / 2.0)
 _LEAF_ROBOT_ROTMAT = oum.rotmat_from_axangle(ouc.StandardAxis.Z, -np.pi / 2.0)
 _LEAF_ROBOT_POS = np.array([0.42, 0.025, 0.0], dtype=np.float32)
-_TUBE_POS_OFFSET = np.array([0.0, 0.0, -0.05], dtype=np.float32)
+_TUBE_POS_OFFSET = np.array([0.0, 0.0, -0.07], dtype=np.float32)
 _CAP_OPENER_POINT = np.array([0.25761917, -0.04625, 0.09], dtype=np.float32)
 _MM = 1e-3
 _POT_XS_MM = (380, 480, 580, 680, 780)
@@ -360,7 +360,7 @@ def show_tube_picker_points():
     pot_obs_points = pot_observation_points()
     leaf_obs_results = show_leaf_sampler_observations(
         base.scene, leaf_sampler, pot_obs_points)
-    tube_points = tube_picker_pick_points_xy(z=0.07)
+    tube_points = tube_picker_pick_points_xy(z=0.05)
     print('tube handler diagnostics:')
     print_pick_diagnostics(tube_handler, tube_points, _TCP_ROTMAT)
     tube_valid_points, tube_valid_sequences, tube_invalid_points = filter_valid_point_sequences(
