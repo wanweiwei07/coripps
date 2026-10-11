@@ -1,4 +1,4 @@
-"""XM430-driven rotary (angular) two-finger gripper.
+"""XH430-driven rotary (angular) two-finger gripper.
 
 Unlike the parallel jaws elsewhere in the tree, the fingers PIVOT: each one
 turns about the local -X axis through its own hinge, the left one forward and
@@ -20,7 +20,7 @@ subtracts twice the pad thickness: drop it out of ``_PAD_PHI`` by re-solving
 ``half-gap(0) = 0.002 - pad_thickness``.
 
 The pad sits essentially at the top of its arc, so the grasp center travels
-only 0.14 mm across the whole 15 deg -- a constant ``grasp_center`` tcp is
+only 0.14 mm across the whole travel -- a constant ``grasp_center`` tcp is
 accurate here, unlike a linkage gripper whose center sweeps.
 """
 
@@ -48,9 +48,11 @@ _HINGE_Z = 0.01975
 _PAD_R = 0.075
 _REST_HALF_GAP = 0.002
 _PAD_PHI = float(np.arcsin((_REST_HALF_GAP - _HINGE_Y) / _PAD_R))
-_TRAVEL = np.deg2rad(15.0)     # q = 0 is the rest gap, 15 deg is fully open
+_TRAVEL = np.deg2rad(15.0)     # q = 0 is the rest gap, 15 deg is the stop
+OPEN_TRAVEL = np.deg2rad(10.0)    # working 'open': clears a tube without
+                                  # driving the linkage to its limit
 # grasp center: on the mount axis, at the tip-pad height
-_GRASP_CENTER = (0.0, 0.0, 0.0997)
+_GRASP_CENTER = (-0.01, 0.0, 0.0997)
 
 
 def _half_gap(q):
@@ -113,7 +115,7 @@ def prepare_ms():
     return structure
 
 
-class XM430RotaryGripper(orbmb.MechBase, oreb.GripperMixin):
+class XH430RotaryGripper(orbmb.MechBase, oreb.GripperMixin):
     """Angular two-finger gripper. The opening is the TIP-pad gap; the hinge
     angle follows from it in closed form."""
 
@@ -141,7 +143,12 @@ class XM430RotaryGripper(orbmb.MechBase, oreb.GripperMixin):
 
     def opening(self):
         """The current tip-pad gap (the inverse of :meth:`set_opening`)."""
-        return float(2.0 * _half_gap(self.qs[0]))
+        return self.opening_at(self.qs[0])
+
+    @staticmethod
+    def opening_at(q):
+        """The tip-pad gap at hinge angle ``q`` (rad)."""
+        return float(2.0 * _half_gap(q))
 
     def clone(self):
         new = super().clone()
@@ -159,10 +166,10 @@ if __name__ == '__main__':
     import one.viewer.world as ovw
 
     base = ovw.World(cam_pos=[0.3, 0.22, 0.2], cam_lookat_pos=[0, 0, 0.06])
-    gripper = XM430RotaryGripper()
+    gripper = XH430RotaryGripper()
     gripper.fk(qs=[0.0])                       # the zero pose, solid
     gripper.attach_to(base.scene)
-    ghost = XM430RotaryGripper()               # full travel, translucent
+    ghost = XH430RotaryGripper()               # full travel, translucent
     ghost.fk(qs=[_TRAVEL])
     ghost.alpha = 0.3
     ghost.attach_to(base.scene)
@@ -171,7 +178,7 @@ if __name__ == '__main__':
     ossop.frame(pos=gc_tf[:3, 3], rotmat=gc_tf[:3, :3],
                 color_mat=ouc.CoordColor.MYC).attach_to(base.scene)
     print(f'q = 0 deg  -> opening {gripper.opening() * 1000:.3f} mm  (solid)')
-    print(f'q = 15 deg -> opening {ghost.opening() * 1000:.3f} mm  (ghost)')
+    print(f'q = {np.degrees(_TRAVEL):.0f} deg -> opening {ghost.opening() * 1000:.3f} mm  (ghost)')
     builtins.base = base
     builtins.gripper = gripper
     base.run()

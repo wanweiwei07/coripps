@@ -14,6 +14,7 @@ import one.utils.math as oum
 import one.viewer.world as ovw
 import one.robots.base.kine_visualizer as orbkv
 import one.robots.manipulators.denso.cvr038 as ormdc
+from coripps.grippers.xh430_cutter import XH430Cutter
 
 
 _RIKEN_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -61,7 +62,8 @@ def solve_d405_obs_all(robot, max_solutions=8, seed_count=2048):
 
 
 class LeafSampler(ormdc.CVR038):
-    """CVR038 with a D405 sensor mounted on the joint-5 link."""
+    """CVR038 with a D405 sensor on the joint-5 link and the XH430 four-bar
+    cutter on the flange."""
 
     def __init__(self, rotmat=None, pos=None):
         super().__init__(rotmat=rotmat, pos=pos)
@@ -74,6 +76,9 @@ class LeafSampler(ormdc.CVR038):
         )
         # mount the sensor on the j5 link
         self.mount(self.d405, self.j5_link, _D405_TF_J5, update=True)
+        # the cutter's base origin is its flange-mating face
+        self.cutter = XH430Cutter()
+        self.mount(self.cutter, self.runtime_lnks[-1], update=True)
         # 5-joint chain (root -> j5 link) + the camera frame as a tcp
         compiled = self.structure.compiled
         jidx5 = self.chain('main').jnt_ids_in_structure[4]
@@ -91,6 +96,7 @@ class LeafSampler(ormdc.CVR038):
     def clone(self):
         new = super().clone()
         new.d405_frame = new.tcp('d405')
+        new.cutter = next(c for c in new._mountings if isinstance(c, XH430Cutter))
         return new
 
 

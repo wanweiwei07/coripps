@@ -22,9 +22,9 @@ _BASE_PATH = os.path.join(_RIKEN_DIR, 'models', 'base.stl')
 _BASE_ROTMAT = np.eye(3, dtype=np.float32)
 _BASE_POS = np.zeros(3, dtype=np.float32)
 _TUBE_PICKER_ROTMAT = np.eye(3, dtype=np.float32)
-_TUBE_PICKER_POS = np.zeros(3, dtype=np.float32)
+_TUBE_PICKER_POS = np.array([0.0, 0.0, 0.005], dtype=np.float32)
 _LEAF_SAMPLER_ROTMAT = oum.rotmat_from_axangle(ouc.StandardAxis.Z, -np.pi / 2.0)
-_LEAF_SAMPLER_POS = np.array([0.42, 0.031, 0.0], dtype=np.float32)
+_LEAF_SAMPLER_POS = np.array([0.42, 0.031, 0.005], dtype=np.float32)
 
 
 def mobisys():

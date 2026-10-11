@@ -1,15 +1,16 @@
-"""Machine 2 (the COBOTTA at 192.168.0.102) visits the tubes one after another.
+"""The picker (the COBOTTA at 192.168.0.102) visits the tubes in turn.
 
-Both arms are shown and both START FROM THEIR REAL JOINT ANGLES. Machine 2 is
-the actor; machine 1 is read once and then stands still as an obstacle -- its
+Both arms are shown and both START FROM THEIR REAL JOINT ANGLES. The picker is
+the actor; the sampler is read once and then stands still as an obstacle -- its
 pose is baked into the collision model, so it is read BEFORE the model is
 compiled and the connection is dropped afterwards.
 
 The tube grid, the TCP orientation and the four-pose sequence all come from
-``coripps.main``. Press ``space`` for the next tube: the motion is PREVIEWED as
-an animation first and sent to the controller only once the animation has run
-through. One tube is a transfer to ``pre_pick_high`` followed by the local
-``pre_pick -> pick_place -> lift``. The gripper is not used yet -- the arm just
+``coripps.pick_layout`` / ``pose_sequence``. Press ``space`` for the next
+tube: the
+motion is PREVIEWED as an animation first and sent to the controller only once
+the animation has run through. One tube is a transfer to ``pre_pick_high`` followed by the local
+``pre_pick -> pick -> lift``. The gripper is not used yet -- the arm just
 goes to the poses.
 
 The transfer to the FIRST tube is planned with RRT-Connect, because the arm
@@ -26,7 +27,7 @@ import time
 import numpy as np
 import pyglet.window.key as pkey
 
-# Allow running as `python coripps/machine2_motion.py` from the project root.
+# Allow running as `python coripps/picker_motion.py` from the project root.
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
@@ -40,14 +41,16 @@ import one.motion.core.planning_context as omppc
 import one.motion.probabilistic.rrt as ompr
 from one.drivers.cobotta import BCapError, Cobotta, CobottaMotion
 
-import coripps.main as cmain
+import coripps.pick_layout as layout
+import coripps.pose_sequence as pseq
+import coripps.pick_poses_io as ppio
 from coripps.robots.mobisys import mobisys
 
 
-# This PC is 192.168.0.100; machine 1 is the leaf sampler, machine 2 the tube
-# handler.
-_MACHINE1_HOST = '192.168.0.101'
-_MACHINE2_HOST = '192.168.0.102'
+# This PC is 192.168.0.100; the sampler is the leaf-sampling arm, the
+# picker the tube handler.
+_SAMPLER_HOST = '192.168.0.101'
+_PICKER_HOST = '192.168.0.102'
 _EXEC_SPEED = 100.0                      # external speed/accel/decel, percent
 _CD_STEP_SIZE = np.pi / 180             # edge collision-check resolution
 _EXTEND_STEP_SIZE = np.pi / 36          # RRT extension step
@@ -56,7 +59,9 @@ _SHORTCUT_ITERS = 200
 _PREVIEW_STEP = np.pi / 60              # preview animation resolution
 _PREVIEW_INTERVAL = 0.03
 _START_TOLERANCE = np.deg2rad(2.0)      # real-vs-planned start mismatch guard
-_TUBE_Z = 0.07                          # grasp_center height over the tube grid
+# the grid height comes from the layout, so a live solve and the
+# precomputed file can never disagree about where the tubes are
+_TUBE_Z = layout.PICK_Z
 _TUBE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                           'models', 'tube.stl')
 
@@ -79,38 +84,59 @@ def build_scene():
     base = ovw.World(cam_pos=(1.25, 0.75, 0.65),
                      cam_lookat_pos=(0.45, -0.10, 0.12))
     ossop.frame().attach_to(base.scene)
-    mobisys_base, machine2, machine1 = mobisys()
+    mobisys_base, picker, sampler = mobisys()
     mobisys_base.attach_to(base.scene)
-    machine2.attach_to(base.scene)
-    machine2.gripper.attach_to(base.scene)
-    machine2.gripper.toggle_tcp('grasp_center', color_mat=ouc.CoordColor.MYC)
-    machine1.attach_to(base.scene)
-    return base, mobisys_base, machine2, machine1
+    picker.attach_to(base.scene)
+    picker.gripper.attach_to(base.scene)
+    picker.gripper.toggle_tcp('grasp_center', color_mat=ouc.CoordColor.MYC)
+    sampler.attach_to(base.scene)
+    return base, mobisys_base, picker, sampler
 
 
-def build_planning_context(machine2, machine1):
-    """Machine 2 is the actor; machine 1 and the ground are obstacles.
+def freeze_sampler(sampler):
+    """Read the sampler once and leave it standing there as an obstacle.
 
-    Machine 1's pose is frozen into the MuJoCo model here, so it has to be at
+    It is only ever READ: one pose, then the socket goes away. The pose is
+    baked into the collision model afterwards, so a later move of it would NOT
+    be seen -- restart the script if it moves. Shared with the single-tube
+    pick script.
+    """
+    reader = connect(_SAMPLER_HOST, 'sampler', motion=False)
+    if reader is None:
+        print('sampler: left at its sim pose as an obstacle')
+        return
+    try:
+        sampler.fk(qs=reader.joint_angles(ndof=sampler.ndof))
+        print('sampler: frozen at its real pose as an obstacle -- '
+              'restart this script if it moves')
+    except (OSError, BCapError) as exc:
+        print(f'sampler: read failed ({exc}) -- left at its sim pose')
+    reader.close()
+
+
+def build_planning_context(picker, sampler):
+    """The picker is the actor; the sampler and the ground are obstacles.
+
+    The sampler's pose is frozen into the MuJoCo model here, so it has to be at
     its real angles already. The tubes are deliberately NOT obstacles -- the
     arm has to reach into them.
     """
     ground = ossop.plane()
     collider = ocm.MJCollider()
-    collider.append(machine2)
-    collider.append(machine1)
+    collider.append(picker)
+    collider.append(sampler)
     collider.append(ground)
-    collider.actors = [machine2]
+    collider.actors = [picker]
     collider.compile()
     return omppc.PlanningContext(collider=collider,
                                  cd_step_size=_CD_STEP_SIZE), ground
 
 
-def solve_tubes(machine2):
+def solve_tubes(picker):
     """Every reachable tube on the grid, with its four-pose joint sequence."""
-    points = cmain.tube_picker_pick_points_xy(z=_TUBE_Z)
-    valid_points, sequences, invalid_points = \
-        cmain.filter_valid_point_sequences(machine2, points, cmain._TCP_ROTMAT)
+    points = layout.pick_points_xy(z=_TUBE_Z)
+    valid_points, sequences, _rotmats, invalid_points = pseq.filter_valid(
+        picker, points, layout.tcp_rotmats, layout.pose_points)
     print(f'tubes: {len(valid_points)} reachable of {len(points)} grid points '
           f'({len(invalid_points)} without a usable IK sequence)')
     return valid_points, sequences
@@ -123,8 +149,8 @@ def show_tubes(scene, points):
                                           alpha=0.5)
     for point in points:
         tube = template.clone()
-        tube.set_pos_rotmat(pos=point + cmain._TUBE_POS_OFFSET,
-                            rotmat=cmain._TUBE_ROTMAT)
+        tube.set_pos_rotmat(pos=point + ppio.TUBE_POS_OFFSET,
+                            rotmat=ppio.TUBE_ROTMAT)
         tube.attach_to(scene)
 
 
@@ -168,32 +194,24 @@ def build_program(transfer, seq):
     """The joint waypoints for one tube.
 
     ``transfer`` already ends at ``seq[0]`` (pre_pick_high), so what is left is
-    the local descent ``pre_pick -> pick_place -> lift``.
+    the local descent ``pre_pick -> pick -> lift``.
     """
     return list(transfer) + [seq[1], seq[2], seq[3]]
 
 
-def main():
-    base, mobisys_base, machine2, machine1 = build_scene()
+def main(tube_source=solve_tubes):
+    """Run the interactive tube tour.
 
-    # machine 1 is only ever read: one pose, then the socket goes away. It is
-    # baked into the collision model, so a later move of it would NOT be seen.
-    reader = connect(_MACHINE1_HOST, 'machine1', motion=False)
-    if reader is not None:
-        try:
-            machine1.fk(qs=reader.joint_angles(ndof=machine1.ndof))
-            print('machine1: frozen at its real pose as an obstacle -- '
-                  'restart this script if it moves')
-        except (OSError, BCapError) as exc:
-            print(f'machine1: read failed ({exc}) -- left at its sim pose')
-        reader.close()
-    else:
-        print('machine1: left at its sim pose as an obstacle')
+    ``tube_source(picker)`` supplies ``(points, sequences)``; the default
+    solves the grid here, ``picker_execute_picks`` passes a loader for the
+    precomputed ``config/pick_poses.json`` instead.
+    """
+    base, mobisys_base, picker, sampler = build_scene()
+    freeze_sampler(sampler)
+    cobotta = connect(_PICKER_HOST, 'picker', motion=True)
 
-    cobotta = connect(_MACHINE2_HOST, 'machine2', motion=True)
-
-    pln_ctx, ground = build_planning_context(machine2, machine1)
-    tube_points, tube_sequences = solve_tubes(machine2)
+    pln_ctx, ground = build_planning_context(picker, sampler)
+    tube_points, tube_sequences = tube_source(picker)
     if len(tube_points) == 0:
         print('tubes: nothing reachable -- nothing to do')
         if cobotta is not None:
@@ -202,12 +220,12 @@ def main():
     show_tubes(base.scene, tube_points)
 
     if cobotta is not None:
-        machine2.fk(qs=cobotta.joint_angles(ndof=machine2.ndof))
+        picker.fk(qs=cobotta.joint_angles(ndof=picker.ndof))
     else:
         # the sim rest pose (all zeros) is itself in collision, so there would
         # be nothing to plan from -- park the arm at the first tube
-        machine2.fk(qs=tube_sequences[0][0])
-        print('machine2: no controller -- animation only, nothing is sent')
+        picker.fk(qs=tube_sequences[0][0])
+        print('picker: no controller -- animation only, nothing is sent')
 
     cursor = ossop.sphere(pos=tube_points[0], radius=0.009, segments=12,
                           rgb=ouc.BasicColor.YELLOW, alpha=1.0)
@@ -221,12 +239,12 @@ def main():
     def current_pose():
         """Where the next transfer has to start from."""
         if cobotta is not None:
-            return cobotta.joint_angles(ndof=machine2.ndof)
+            return cobotta.joint_angles(ndof=picker.ndof)
         if state['program'] is not None:
             # no controller: pretend the last program ran, otherwise the start
             # would be wherever the preview animation happens to have stopped
             return state['program'][-1]
-        return np.asarray(machine2.qs, dtype=np.float32)
+        return np.asarray(picker.qs, dtype=np.float32)
 
     def select_tube():
         """Plan the next tube, walking forward past the ones that fail.
@@ -271,12 +289,12 @@ def main():
     def start_execution():
         """Called once the preview animation has run through."""
         if cobotta is None:
-            machine2.fk(qs=state['program'][-1])
+            picker.fk(qs=state['program'][-1])
             state['mode'] = 'idle'
             print("  no controller -- 'space' for the next tube")
             return
         try:
-            real_qs = cobotta.joint_angles(ndof=machine2.ndof)
+            real_qs = cobotta.joint_angles(ndof=picker.ndof)
         except (OSError, BCapError) as exc:
             print(f'execute: lost {cobotta.host} ({exc})')
             state['mode'] = 'idle'
@@ -312,7 +330,7 @@ def main():
             # one Move per tick; the last one stops precisely (@0), the rest
             # pass through (@P)
             cobotta.move_qs(program[i], pass_motion=(i < len(program) - 1))
-            machine2.fk(qs=cobotta.joint_angles(ndof=machine2.ndof))
+            picker.fk(qs=cobotta.joint_angles(ndof=picker.ndof))
         except (OSError, BCapError) as exc:
             # release on failure, so the next enable() runs ClearError
             print(f'execute: move {i} failed ({exc}) -- stopping')
@@ -326,7 +344,7 @@ def main():
         if state['i'] >= len(preview):
             start_execution()               # animation done, now the real arm
             return
-        machine2.fk(qs=preview[state['i']])
+        picker.fk(qs=preview[state['i']])
         state['i'] += 1
 
     def tick(dt):
@@ -342,20 +360,22 @@ def main():
 
     base.schedule_interval(tick, interval=_PREVIEW_INTERVAL)
     print("ready: 'space' animates the move to the next tube, then runs it")
-    return base, cobotta, machine1, machine2, tube_points, tube_sequences, state
+    return base, cobotta, sampler, picker, tube_points, tube_sequences, state
 
 
-if __name__ == '__main__':
+def run(result):
+    """Publish what ``main`` returned to ``builtins`` and enter the viewer
+    loop, always releasing the controller on the way out. Shared with
+    ``picker_execute_picks``."""
     import builtins
 
-    result = main()
     if result is not None:
-        (base, cobotta, machine1, machine2,
+        (base, cobotta, sampler, picker,
          tube_points, tube_sequences, state) = result
         builtins.base = base
         builtins.cobotta = cobotta
-        builtins.machine1 = machine1
-        builtins.machine2 = machine2
+        builtins.sampler = sampler
+        builtins.picker = picker
         builtins.tube_points = tube_points
         builtins.tube_sequences = tube_sequences
         builtins.state = state
@@ -364,3 +384,7 @@ if __name__ == '__main__':
         finally:
             if cobotta is not None:
                 cobotta.close()
+
+
+if __name__ == '__main__':
+    run(main())

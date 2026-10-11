@@ -11,19 +11,21 @@ import one.utils.constant as ouc
 import one.scene.scene_object_primitive as ossop
 import one.robots.manipulators.denso.cvr038 as ormdc
 
-from coripps.grippers.xm430_rotary import XM430RotaryGripper
+from coripps.grippers.xh430_gripper import XH430RotaryGripper, OPEN_TRAVEL
 
 
 class TubePicker(ormdc.CVR038):
-    """CVR038 arm with the XM430 rotary tube-picking gripper mounted."""
+    """CVR038 arm with the XH430 rotary tube-picking gripper mounted."""
 
     def __init__(self, rotmat=None, pos=None, jaw_width=None):
         super().__init__(rotmat=rotmat, pos=pos)
-        self.gripper = XM430RotaryGripper()
-        # the rotary jaw rests 4 mm apart and opens to ~43 mm, so 'fully open'
-        # is read off the gripper rather than hard-coded
+        self.gripper = XH430RotaryGripper()
+        # default to the WORKING open angle (10 deg, ~30 mm), not the 15 deg
+        # mechanical stop -- that is what the real gripper is driven to before
+        # a pick, and it keeps the linkage off its limit
         self.gripper.set_opening(
-            self.gripper.jaw_range[1] if jaw_width is None else jaw_width)
+            self.gripper.opening_at(OPEN_TRAVEL) if jaw_width is None
+            else jaw_width)
         self.mount(self.gripper, self.runtime_lnks[-1], update=True)
 
     def toggle_joint_frames(self, length_scale=0.28, radius_scale=0.35,

@@ -1,14 +1,14 @@
-"""Send machine 2 (the COBOTTA at 192.168.0.102) to its home joint pose.
+"""Send the sampler (the COBOTTA at 192.168.0.101) to its home joint pose.
 
 Home is all zeros except J3, which is folded up to 90 deg -- J3 cannot go below
 18 deg anyway, and at 90 the arm stands clear instead of reaching out.
 
-Headless: no viewer, nothing to press. Machine 1 is read once and baked into
-the collision model as a standing obstacle, exactly as in
-``coripps.machine2_motion``. The move is the straight joint-space line when it
-is free, RRT-Connect otherwise, and nothing is sent when neither works.
+Headless: no viewer, nothing to press. The picker is read once and baked into
+the collision model as a standing obstacle, the mirror image of
+``coripps.picker_home``. The move is the straight joint-space line when it is
+free, RRT-Connect otherwise, and nothing is sent when neither works.
 
-    py -3.12 coripps/machine2_home.py
+    py -3.12 coripps/sampler_home.py
 """
 
 import os
@@ -17,7 +17,7 @@ import time
 
 import numpy as np
 
-# Allow running as `python coripps/machine2_home.py` from the project root.
+# Allow running as `python coripps/sampler_home.py` from the project root.
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
@@ -31,8 +31,8 @@ from one.drivers.cobotta import BCapError, Cobotta, CobottaMotion
 from coripps.robots.mobisys import mobisys
 
 
-_MACHINE1_HOST = '192.168.0.101'
-_MACHINE2_HOST = '192.168.0.102'
+_SAMPLER_HOST = '192.168.0.101'
+_PICKER_HOST = '192.168.0.102'
 _EXEC_SPEED = 30.0                      # homing transit, so slower than a pick
 _CD_STEP_SIZE = np.pi / 180
 _EXTEND_STEP_SIZE = np.pi / 36
@@ -43,40 +43,41 @@ _HOME_QS_DEG = (0.0, 0.0, 90.0, 0.0, 0.0, 0.0)
 
 
 def _build():
-    _, machine2, machine1 = mobisys()
+    _, picker, sampler = mobisys()
 
-    # machine 1 only ever gets read: one pose, then the socket goes away. It is
-    # frozen into the collision model, so a later move of it would NOT be seen.
+    # the picker only ever gets read: one pose, then the socket goes away. It
+    # is frozen into the collision model, so a later move of it would NOT be
+    # seen.
     try:
-        reader = Cobotta(_MACHINE1_HOST).connect()
+        reader = Cobotta(_PICKER_HOST).connect()
     except (OSError, BCapError) as exc:
-        print(f'machine1: cannot reach {_MACHINE1_HOST} ({exc}) -- '
+        print(f'picker: cannot reach {_PICKER_HOST} ({exc}) -- '
               'left at its sim pose as an obstacle')
     else:
         try:
-            qs1 = reader.joint_angles(ndof=machine1.ndof)
-            machine1.fk(qs=qs1)
-            print(f'machine1: frozen as an obstacle at '
-                  f'{np.round(np.degrees(qs1), 2)} deg')
+            qs2 = reader.joint_angles(ndof=picker.ndof)
+            picker.fk(qs=qs2)
+            print(f'picker: frozen as an obstacle at '
+                  f'{np.round(np.degrees(qs2), 2)} deg')
         except (OSError, BCapError) as exc:
-            print(f'machine1: read failed ({exc}) -- left at its sim pose')
+            print(f'picker: read failed ({exc}) -- left at its sim pose')
         reader.close()
 
     ground = ossop.plane()
     collider = ocm.MJCollider()
-    collider.append(machine2)
-    collider.append(machine1)
+    collider.append(sampler)
+    collider.append(picker)
     collider.append(ground)
-    collider.actors = [machine2]
+    collider.actors = [sampler]
     collider.compile()
     pln_ctx = omppc.PlanningContext(collider=collider,
                                     cd_step_size=_CD_STEP_SIZE)
-    return ground, collider, machine2, pln_ctx
+    return ground, collider, sampler, pln_ctx
 
 
 def home():
-    """Plan and run machine 2 to all zeros. True when it arrived."""
-    _, _, machine2, pln_ctx = _build()
+    """Plan and run the sampler to all zeros. True when it arrived."""
+    _, _, sampler, pln_ctx = _build()
 
     wanted = np.deg2rad(np.asarray(_HOME_QS_DEG, dtype=np.float32))
     goal = pln_ctx.enforce_bounds(wanted)
@@ -88,22 +89,22 @@ def home():
         return False
 
     try:
-        cobotta = CobottaMotion(_MACHINE2_HOST, speed=_EXEC_SPEED).connect()
+        cobotta = CobottaMotion(_SAMPLER_HOST, speed=_EXEC_SPEED).connect()
     except (OSError, BCapError) as exc:
-        print(f'machine2: cannot reach {_MACHINE2_HOST} ({exc})')
+        print(f'sampler: cannot reach {_SAMPLER_HOST} ({exc})')
         return False
-    print(f'machine2: connected to {_MACHINE2_HOST}')
+    print(f'sampler: connected to {_SAMPLER_HOST}')
 
     try:
         start = pln_ctx.enforce_bounds(
-            cobotta.joint_angles(ndof=machine2.ndof))
-        print(f'machine2: at {np.round(np.degrees(start), 2)} deg')
+            cobotta.joint_angles(ndof=sampler.ndof))
+        print(f'sampler: at {np.round(np.degrees(start), 2)} deg')
         if not pln_ctx.is_state_valid(start):
             print('start: the current pose is in collision -- cannot plan '
                   'from it')
             return False
         if np.max(np.abs(start - goal)) <= _ARRIVAL_TOLERANCE:
-            print('machine2: already home -- nothing to do')
+            print('sampler: already home -- nothing to do')
             return True
 
         if pln_ctx.is_motion_valid(start, goal):
@@ -123,18 +124,18 @@ def home():
             print(f'path: planned, {len(path)} waypoints in {elapsed:.3f}s')
 
         cobotta.enable()
-        print(f'machine2: running at {_EXEC_SPEED:.0f}%')
+        print(f'sampler: running at {_EXEC_SPEED:.0f}%')
         cobotta.move_path(
             path,
             on_waypoint=lambda i, qs: print(
                 f'  {i + 1}/{len(path)} {np.round(np.degrees(qs), 2)}'))
-        reached = cobotta.joint_angles(ndof=machine2.ndof)
+        reached = cobotta.joint_angles(ndof=sampler.ndof)
         drift = np.max(np.abs(reached - goal))
-        print(f'machine2: arrived at {np.round(np.degrees(reached), 3)} deg '
+        print(f'sampler: arrived at {np.round(np.degrees(reached), 3)} deg '
               f'({np.degrees(drift):.3f} deg off home)')
         return drift <= _ARRIVAL_TOLERANCE
     except (OSError, BCapError) as exc:
-        print(f'machine2: {exc} -- stopping')
+        print(f'sampler: {exc} -- stopping')
         cobotta.disable()
         return False
     finally:

@@ -1,8 +1,8 @@
-"""RRT-Connect motion planning for machine 1 (the COBOTTA at 192.168.0.101).
+"""RRT-Connect motion planning for the sampler (the COBOTTA at 192.168.0.101).
 
 The start configuration is READ from the real controller, the goal is a random
 collision-free configuration, and the path is planned with RRT-Connect against
-the mobile system (machine 2 and the ground are static obstacles).
+the mobile system (the picker and the ground are static obstacles).
 
 The plan is previewed as a looping animation first. Press ``g`` to send it to
 the controller: the arm is taken and the motors powered on the first ``g``, and
@@ -21,7 +21,7 @@ import time
 import numpy as np
 import pyglet.window.key as pkey
 
-# Allow running as `python coripps/machine1_planning.py` from the project root.
+# Allow running as `python coripps/sampler_planning.py` from the project root.
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
@@ -37,9 +37,9 @@ from one.drivers.cobotta import BCapError, CobottaMotion
 from coripps.robots.mobisys import mobisys
 
 
-# This PC is 192.168.0.100; machine 1 is the leaf sampler, machine 2 the tube
-# handler.
-_MACHINE1_HOST = '192.168.0.101'
+# This PC is 192.168.0.100; the sampler is the leaf-sampling arm, the
+# picker the tube handler.
+_SAMPLER_HOST = '192.168.0.101'
 _EXEC_SPEED = 100.0                      # external speed/accel/decel, percent
 _CD_STEP_SIZE = np.pi / 180             # edge collision-check resolution
 _EXTEND_STEP_SIZE = np.pi / 36          # RRT extension step
@@ -52,14 +52,14 @@ _GOAL_TRIES = 200
 _START_TOLERANCE = np.deg2rad(2.0)      # real-vs-planned start mismatch guard
 
 
-def connect_machine1(host=_MACHINE1_HOST):
-    """Connect to machine 1; return None (and say so) when unreachable."""
+def connect_sampler(host=_SAMPLER_HOST):
+    """Connect to the sampler; return None (and say so) when unreachable."""
     try:
         cobotta = CobottaMotion(host, speed=_EXEC_SPEED).connect()
     except (OSError, BCapError) as exc:
-        print(f'machine1: cannot reach {host} ({exc})')
+        print(f'sampler: cannot reach {host} ({exc})')
         return None
-    print(f'machine1: connected to {host}')
+    print(f'sampler: connected to {host}')
     return cobotta
 
 
@@ -68,22 +68,22 @@ def build_scene():
     base = ovw.World(cam_pos=(1.25, 0.75, 0.65),
                      cam_lookat_pos=(0.45, -0.10, 0.12))
     ossop.frame().attach_to(base.scene)
-    mobisys_base, machine2, machine1 = mobisys()
+    mobisys_base, picker, sampler = mobisys()
     mobisys_base.attach_to(base.scene)
-    machine2.attach_to(base.scene)
-    machine2.gripper.attach_to(base.scene)
-    machine1.attach_to(base.scene)
-    return base, mobisys_base, machine2, machine1
+    picker.attach_to(base.scene)
+    picker.gripper.attach_to(base.scene)
+    sampler.attach_to(base.scene)
+    return base, mobisys_base, picker, sampler
 
 
-def build_planning_context(machine1, machine2):
-    """Machine 1 is the actor; machine 2 and the cart top are obstacles."""
+def build_planning_context(sampler, picker):
+    """The sampler is the actor; the picker and the cart top are obstacles."""
     ground = ossop.plane()
     collider = ocm.MJCollider()
-    collider.append(machine1)
-    collider.append(machine2)
+    collider.append(sampler)
+    collider.append(picker)
     collider.append(ground)
-    collider.actors = [machine1]
+    collider.actors = [sampler]
     collider.compile()
     return omppc.PlanningContext(collider=collider,
                                  cd_step_size=_CD_STEP_SIZE), ground
@@ -118,12 +118,12 @@ def plan(pln_ctx, start, goal):
 
 
 def main():
-    base, mobisys_base, machine2, machine1 = build_scene()
-    pln_ctx, ground = build_planning_context(machine1, machine2)
+    base, mobisys_base, picker, sampler = build_scene()
+    pln_ctx, ground = build_planning_context(sampler, picker)
 
-    cobotta = connect_machine1()
+    cobotta = connect_sampler()
     if cobotta is None:
-        print('machine1: no controller -- planning from the simulated pose, '
+        print('sampler: no controller -- planning from the simulated pose, '
               "'g' will do nothing")
 
     # 'start'/'path'/'preview' are swapped wholesale by replan(), so they live
@@ -135,21 +135,21 @@ def main():
     def current_pose():
         """Where the next plan has to start from."""
         if cobotta is not None:
-            return cobotta.joint_angles(ndof=machine1.ndof)
+            return cobotta.joint_angles(ndof=sampler.ndof)
         if state['path'] is not None:
             # no controller: pretend the last plan ran, otherwise the start
             # would be wherever the preview animation happens to have stopped
             return state['path'][-1]
         # the active-joint slice of the sim pose, i.e. what the planner plans
-        active = machine1.structure.compiled.active_jnt_ids_mask
-        return np.asarray(machine1.qs, dtype=np.float32)[active]
+        active = sampler.structure.compiled.active_jnt_ids_mask
+        return np.asarray(sampler.qs, dtype=np.float32)[active]
 
     def show_ghosts(start, goal):
         """Translucent copies of the arm at both ends of the current plan."""
         if not ghosts:
             for name, rgba in (('start', (1, 0, 0, 0.3)),
                                ('goal', (0, 0, 1, 0.3))):
-                ghost = machine1.clone()
+                ghost = sampler.clone()
                 ghost.rgba = rgba
                 ghost.attach_to(base.scene)
                 ghosts[name] = ghost
@@ -199,7 +199,7 @@ def main():
             print("execute: no controller connected -- nothing to send")
             return
         try:
-            real_qs = cobotta.joint_angles(ndof=machine1.ndof)
+            real_qs = cobotta.joint_angles(ndof=sampler.ndof)
         except (OSError, BCapError) as exc:
             print(f'execute: lost {cobotta.host} ({exc})')
             state['mode'] = 'done'
@@ -235,7 +235,7 @@ def main():
         try:
             # one blocking Move per tick; the last one stops precisely
             cobotta.move_qs(path[i], pass_motion=(i < len(path) - 1))
-            machine1.fk(qs=cobotta.joint_angles(ndof=machine1.ndof))
+            sampler.fk(qs=cobotta.joint_angles(ndof=sampler.ndof))
         except (OSError, BCapError) as exc:
             # release on failure, so the next enable() runs ClearError
             print(f'execute: move {i} failed ({exc}) -- stopping')
@@ -262,11 +262,11 @@ def main():
             return
         if state['mode'] == 'preview':
             preview = state['preview']
-            machine1.fk(qs=preview[state['i']])
+            sampler.fk(qs=preview[state['i']])
             state['i'] = (state['i'] + 1) % len(preview)
 
     base.schedule_interval(tick, interval=_PREVIEW_INTERVAL)
-    return base, cobotta, machine1, machine2, mobisys_base, state
+    return base, cobotta, sampler, picker, mobisys_base, state
 
 
 if __name__ == '__main__':
@@ -274,11 +274,11 @@ if __name__ == '__main__':
 
     result = main()
     if result is not None:
-        base, cobotta, machine1, machine2, mobisys_base, state = result
+        base, cobotta, sampler, picker, mobisys_base, state = result
         builtins.base = base
         builtins.cobotta = cobotta
-        builtins.machine1 = machine1
-        builtins.machine2 = machine2
+        builtins.sampler = sampler
+        builtins.picker = picker
         builtins.state = state
         try:
             base.run()
