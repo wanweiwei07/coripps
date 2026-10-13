@@ -12,15 +12,8 @@ either can be thrown away without touching the other.
 """
 
 import os
-import sys
 
 import numpy as np
-
-# Allow running as `py -3.12 coripps/tool/leaf_sampler_pot_reach.py` from root.
-_PROJECT_ROOT = os.path.dirname(os.path.dirname(
-    os.path.dirname(os.path.abspath(__file__))))
-if _PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, _PROJECT_ROOT)
 
 import one.utils.constant as ouc
 import one.scene.scene_object as osso
@@ -30,7 +23,8 @@ import one.viewer.world as ovw
 from coripps.robots.mobisys import mobisys
 
 
-_POT_PATH = os.path.join(_PROJECT_ROOT, 'coripps', 'models', 'pot.stl')
+_POT_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                         'models', 'pot.stl')
 _POT_ROTMAT = np.eye(3, dtype=np.float32)
 
 _MM = 1e-3

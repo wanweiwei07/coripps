@@ -8,7 +8,7 @@ the read-back state. Ctrl+C at any point switches everything off.
 
 import time
 
-from one.drivers.contec_dio import ContecDIO
+from coripps.drivers.contec_dio import ContecDIO
 
 ON_TIME = 10.0
 

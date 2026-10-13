@@ -1,11 +1,5 @@
 import os
-import sys
 import numpy as np
-
-# Allow running as `python riken/robots/leaf_sampler.py` from the project root.
-_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-if _PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, _PROJECT_ROOT)
 
 import one.scene.scene_object as osso
 import one.scene.scene_object_primitive as ossop
@@ -14,11 +8,12 @@ import one.utils.math as oum
 import one.viewer.world as ovw
 import one.robots.base.kine_visualizer as orbkv
 import one.robots.manipulators.denso.cvr038 as ormdc
-from coripps.grippers.xh430_cutter import XH430Cutter
+from coripps.end_effectors.xh430_cutter import XH430Cutter
 
 
-_RIKEN_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_D405_PATH = os.path.join(_RIKEN_DIR, 'models', 'd405.stl')
+_D405_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    'models', 'd405.stl')
 _D405_POS_J5 = np.array([-0.0245, -0.0445, 0.0235], dtype=np.float32)
 _D405_ROTMAT_J5 = np.eye(3, dtype=np.float32)
 _D405_TF_J5 = oum.tf_from_pos_rotmat(_D405_POS_J5, _D405_ROTMAT_J5)

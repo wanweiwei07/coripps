@@ -1,11 +1,5 @@
 import os
-import sys
 import numpy as np
-
-# Allow running as `python riken/robots/mobisys.py` from the project root.
-_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-if _PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, _PROJECT_ROOT)
 
 import one.scene.scene_object as osso
 import one.scene.scene_object_primitive as ossop
@@ -17,8 +11,9 @@ from coripps.robots.leaf_sampler import LeafSampler
 from coripps.robots.tube_picker import TubePicker
 
 
-_RIKEN_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_BASE_PATH = os.path.join(_RIKEN_DIR, 'models', 'base.stl')
+_BASE_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    'models', 'base.stl')
 _BASE_ROTMAT = np.eye(3, dtype=np.float32)
 _BASE_POS = np.zeros(3, dtype=np.float32)
 _TUBE_PICKER_ROTMAT = np.eye(3, dtype=np.float32)

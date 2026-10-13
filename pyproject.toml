@@ -1,0 +1,17 @@
+[build-system]
+requires = ['setuptools>=68', 'wheel']
+build-backend = 'setuptools.build_meta'
+
+[project]
+name = 'coripps'
+version = '0.1.0'
+description = 'Leaf sampling / tube picking cell built on the one library.'
+requires-python = '>=3.12'
+dependencies = ['one']
+
+[tool.setuptools]
+# The repo root IS the coripps package. Installed editable
+# (`py -3.12 -m pip install -e coripps`), so subpackages resolve through the
+# package's own directory and need not be listed.
+package-dir = {'coripps' = '.'}
+packages = ['coripps']

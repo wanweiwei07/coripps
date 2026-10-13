@@ -1,0 +1,6 @@
+Metadata-Version: 2.4
+Name: coripps
+Version: 0.1.0
+Summary: Leaf sampling / tube picking cell built on the one library.
+Requires-Python: >=3.12
+Requires-Dist: one

@@ -8,7 +8,7 @@ switches everything off.
     py -3.12 coripps/_test/test_contec_vacuum_generator.py
 """
 
-from one.drivers.contec_dio import ContecDIO
+from coripps.drivers.contec_dio import ContecDIO
 
 STEPS = ['suck', 'off', 'blow', 'off', 'suck', 'blow', 'off']
 

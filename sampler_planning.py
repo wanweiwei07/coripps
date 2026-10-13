@@ -14,17 +14,10 @@ one to a new random goal, starting from wherever the arm is now -- so ``space``,
 (or close the window) to quit.
 """
 
-import os
-import sys
 import time
 
 import numpy as np
 import pyglet.window.key as pkey
-
-# Allow running as `python coripps/sampler_planning.py` from the project root.
-_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if _PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, _PROJECT_ROOT)
 
 import one.utils.constant as ouc
 import one.scene.scene_object_primitive as ossop

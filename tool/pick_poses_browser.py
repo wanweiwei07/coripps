@@ -1,6 +1,6 @@
-"""Look at what ``precompute_pick_poses`` produced, one pose at a time.
+"""Look at what ``precompute_poses_pick`` produced, one pose at a time.
 
-Reads ``config/pick_poses.json`` -- it does NOT re-solve, so it opens in a
+Reads ``config/poses_pick.json`` -- it does NOT re-solve, so it opens in a
 second instead of a minute, and what you see is exactly the data the execution
 scripts will replay, not a fresh IK solution that may have picked a different
 branch.
@@ -14,35 +14,30 @@ stored joint angles and parking a yellow cursor on the TCP position.
 """
 
 import os
-import sys
 
 import numpy as np
 import pyglet.window.key as pkey
-
-# Allow running as `py -3.12 coripps/tool/pick_poses_browser.py` from the root.
-_PROJECT_ROOT = os.path.dirname(os.path.dirname(
-    os.path.dirname(os.path.abspath(__file__))))
-if _PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, _PROJECT_ROOT)
 
 import one.utils.constant as ouc
 import one.scene.scene_object as osso
 import one.scene.scene_object_primitive as ossop
 import one.viewer.world as ovw
 
-import coripps.pick_layout as layout
-import coripps.pick_poses_io as ppio
+import coripps.tool.layout_pick as layout
+import coripps.tool.poses_io_pick as ppio
 from coripps.robots.mobisys import mobisys
 
 
-_TUBE_PATH = os.path.join(_PROJECT_ROOT, 'coripps', 'models', 'tube.stl')
+_TUBE_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                          'models', 'tube.stl')
 
 
 def browse(path=ppio.PICK_POSES_JSON):
     if not os.path.exists(path):
         raise FileNotFoundError(
-            f'{path} is missing -- run tool/precompute_pick_poses.py first')
-    valid_points, sequences, rotmats, meta = ppio.load(path)
+            f'{path} is missing -- run tool/precompute_poses_pick.py first')
+    valid_points, paths, rotmats, meta = ppio.load(path)
+    sequences = ppio.key_poses(paths, meta)     # the four key poses
     print(f"{len(valid_points)} picks from {os.path.basename(path)} "
           f"(grid {meta.get('grid_total')}, "
           f"grasp height {meta.get('pick_z')})")

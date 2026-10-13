@@ -1,17 +1,10 @@
-import os
-import sys
 import numpy as np
-
-# Allow running as `python riken/robots/tube_picker.py` from the project root.
-_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-if _PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, _PROJECT_ROOT)
 
 import one.utils.constant as ouc
 import one.scene.scene_object_primitive as ossop
 import one.robots.manipulators.denso.cvr038 as ormdc
 
-from coripps.grippers.xh430_gripper import XH430RotaryGripper, OPEN_TRAVEL
+from coripps.end_effectors.xh430_gripper import XH430Gripper, OPEN_TRAVEL
 
 
 class TubePicker(ormdc.CVR038):
@@ -19,12 +12,12 @@ class TubePicker(ormdc.CVR038):
 
     def __init__(self, rotmat=None, pos=None, jaw_width=None):
         super().__init__(rotmat=rotmat, pos=pos)
-        self.gripper = XH430RotaryGripper()
-        # default to the WORKING open angle (10 deg, ~30 mm), not the 15 deg
+        self.gripper = XH430Gripper()
+        # default to the WORKING open angle (10 deg, ~30 mm), not the full
         # mechanical stop -- that is what the real gripper is driven to before
         # a pick, and it keeps the linkage off its limit
         self.gripper.set_opening(
-            self.gripper.opening_at(OPEN_TRAVEL) if jaw_width is None
+            self.gripper.opening_from_angle(OPEN_TRAVEL) if jaw_width is None
             else jaw_width)
         self.mount(self.gripper, self.runtime_lnks[-1], update=True)
 
