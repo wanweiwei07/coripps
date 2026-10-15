@@ -1,14 +1,15 @@
 """Send the sampler (the COBOTTA at 192.168.0.101) to its home joint pose.
 
-Home is all zeros except J3, which is folded up to 90 deg -- J3 cannot go below
-18 deg anyway, and at 90 the arm stands clear instead of reaching out.
+Home: the cutter's tcp at (100, -50, 100) mm in the sampler's base frame,
+pointing straight down (the start / retreat pose of
+``coripps.single_routine``), as joint angles.
 
 Headless: no viewer, nothing to press. The picker is read once and baked into
 the collision model as a standing obstacle, the mirror image of
 ``coripps.picker_home``. The move is the straight joint-space line when it is
 free, RRT-Connect otherwise, and nothing is sent when neither works.
 
-    py -3.12 coripps/sampler_home.py
+    py -3.12 coripps/tool/home_sampler.py
 """
 
 import sys
@@ -33,7 +34,8 @@ _EXTEND_STEP_SIZE = np.pi / 36
 _MAX_ITERS = 3000
 _SHORTCUT_ITERS = 200
 _ARRIVAL_TOLERANCE = np.deg2rad(0.5)
-_HOME_QS_DEG = (0.0, 0.0, 90.0, 0.0, 0.0, 0.0)
+# the cutter tcp at (100, -50, 100) mm (base frame), pointing down
+_HOME_QS_DEG = (-6.28, -10.91, 132.23, 0.0, 58.68, -36.28)
 
 
 def _build():
@@ -70,7 +72,7 @@ def _build():
 
 
 def home():
-    """Plan and run the sampler to all zeros. True when it arrived."""
+    """Plan and run the sampler home. True when it arrived."""
     _, _, sampler, pln_ctx = _build()
 
     wanted = np.deg2rad(np.asarray(_HOME_QS_DEG, dtype=np.float32))

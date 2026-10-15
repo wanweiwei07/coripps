@@ -104,7 +104,7 @@ def prepare_ms():
     mesh_dir = structure.default_mesh_dir
 
     base_lnk = orbms.Link.from_file(
-        os.path.join(mesh_dir, 'base.stl'),
+        os.path.join(mesh_dir, 'base_d405.stl'),
         collision_type=ouc.CollisionType.MESH,
         rgb=ouc.ExtendedColor.SILVER,
     )

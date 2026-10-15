@@ -21,8 +21,8 @@ Keys: ``space`` runs the next tube, ``q``/``esc`` quits.
 
 import os
 
-import coripps.tool.layout_pick as layout
-import coripps.tool.poses_io_pick as ppio
+import coripps.tool.tube.layout_pick as layout
+import coripps.tool.tube.poses_io_pick as ppio
 import coripps.picker_motion as pkm
 
 

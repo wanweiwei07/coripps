@@ -40,9 +40,9 @@ import one.motion.core.planning_context as omppc
 import one.motion.probabilistic.rrt as ompr
 from one.drivers.cobotta import BCapError, Cobotta, CobottaMotion
 
-import coripps.tool.layout_pick as layout
+import coripps.tool.tube.layout_pick as layout
 import coripps.tool.pose_sequence as pseq
-import coripps.tool.poses_io_pick as ppio
+import coripps.tool.tube.poses_io_pick as ppio
 from coripps.robots.mobisys import mobisys
 from coripps.end_effectors.xh430_gripper import OPEN_TRAVEL
 from coripps.end_effectors.xh430_gripper.exec import (XH430GripperExec,
