@@ -86,7 +86,7 @@ def main():
         """Start one program step on the real servo."""
         target, _ = program[step]
         if target is None:
-            real.close_jaws(wait=False)
+            real.close(wait=False)
             print(f'  step {step + 1}/{len(program)}: closing onto the stop')
         else:
             real.move_to_deg(target, wait=False)
@@ -125,7 +125,7 @@ def main():
             print(f'  step {state["step"] + 1}: still moving after '
                   f'{_EXEC_TIMEOUT}s -- moving on')
         if program[state['step']][0] is None:
-            real.hold()                 # close_jaws(wait=False) left it to us
+            real.hold()                 # close(wait=False) left it to us
         print(f'    settled at {real.angle_deg():5.2f} deg / '
               f'{real.opening_mm():5.2f} mm @ '
               f'{real.dxl.present_current_ma():4.0f} mA')
@@ -183,4 +183,4 @@ if __name__ == '__main__':
     finally:
         if real is not None:
             real.release()
-            real.close()
+            real.disconnect()

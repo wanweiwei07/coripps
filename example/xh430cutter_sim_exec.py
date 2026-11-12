@@ -60,7 +60,7 @@ def main():
         real.connect()
     except (DynamixelError, ContecDIOError) as exc:
         if real is not None:
-            real.close()            # the board opened even if the servo didn't
+            real.disconnect()       # the board opened even if the servo didn't
         real = None
         print(f'{exc}\n         preview only -- "g" has nothing to drive')
 
@@ -167,4 +167,4 @@ if __name__ == '__main__':
     finally:
         if real is not None:
             real.release()
-            real.close()
+            real.disconnect()

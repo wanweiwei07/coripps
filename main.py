@@ -83,11 +83,11 @@ def main(first=0, n=None):
     except RuntimeError as exc:
         print(exc)
         return False
-    last = len(picker.paths) if n is None else min(first + n,
-                                                    len(picker.paths))
+    last = len(picker.points) if n is None else min(first + n,
+                                                    len(picker.points))
     tubes = list(range(first, last))
     if not tubes:
-        print(f'no tubes from {first} on ({len(picker.paths)} precomputed)')
+        print(f'no tubes from {first} on ({len(picker.points)} precomputed)')
         picker.release()
         return False
     plan = sr.plan_picker(picker)
@@ -104,7 +104,7 @@ def main(first=0, n=None):
         sampler = LeafSession()
     except Exception as exc:
         print(f'sampler: cannot start: {exc}')
-        capper.close()
+        capper.disconnect()
         picker.release()
         return False
     try:
@@ -120,8 +120,9 @@ def main(first=0, n=None):
         return len(runner.done) == len(tubes)
     finally:
         sampler.close()                 # ultrasonic / vacuum off, arm back
-        capper.close()                  # the port only
+        capper.disconnect()             # the port only
         picker.release()                # arm back; the gripper port only
+        sr.close_readers()
 
 
 if __name__ == '__main__':

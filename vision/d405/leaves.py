@@ -2,8 +2,8 @@
 coordinate frame per leaf and the leaf to cut.
 
 Per leaf, in the color image (from above):
-  - the plant and its leaves: SAM 3 (text prompts 'plant' and 'leaf', see
-    :class:`Segmenter`); the plant nearest the image centre, the leaves
+  - the plant and its leaves: SAM 3 (text prompts 'plant' and 'leaf',
+    ``one.vision.sam3``); the plant nearest the image centre, the leaves
     mostly inside it
   - blade: each leaf mask opened with a disc of BLADE_OPEN_PX -- its thin
     petiole drops out
@@ -25,10 +25,9 @@ centre, are in the way), so the blades of the cutter can get in.
 import cv2
 import numpy as np
 
+from one.vision.sam3 import Segmenter  # noqa: F401 (used as lv.Segmenter)
 
-SAM3_MODEL = 'facebook/sam3'    # gated: needs an HF login with access
-SCORE_THRESHOLD = 0.5
-MASK_THRESHOLD = 0.5
+
 IN_PLANT = 0.5                  # share of a leaf mask inside the plant mask
 BLADE_OPEN_PX = 7               # disc diameter that removes the petioles
 MIN_BLADE_PX = 40               # smaller blobs are not blades
@@ -47,36 +46,6 @@ def tf(pos, rotmat):
     out[:3, :3] = rotmat
     out[:3, 3] = np.ravel(pos)
     return out
-
-
-class Segmenter:
-    """SAM 3 (text-prompted instance segmentation), loaded once -- that
-    takes ~45 s; a prompt then ~0.15 s on the GPU."""
-
-    def __init__(self, model_id=SAM3_MODEL):
-        import torch
-        from transformers import Sam3Model, Sam3Processor
-        self.torch = torch
-        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
-        self.model = Sam3Model.from_pretrained(model_id).to(self.device)
-        self.model.eval()
-        self.processor = Sam3Processor.from_pretrained(model_id)
-
-    def masks(self, image, prompt):
-        """Bool masks (n, h, w) of every instance of ``prompt`` in the BGR
-        ``image``, best first."""
-        from PIL import Image
-        rgb = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
-        inputs = self.processor(images=rgb, text=prompt,
-                                return_tensors='pt').to(self.device)
-        with self.torch.no_grad():
-            outputs = self.model(**inputs)
-        result = self.processor.post_process_instance_segmentation(
-            outputs, threshold=SCORE_THRESHOLD, mask_threshold=MASK_THRESHOLD,
-            target_sizes=inputs.get('original_sizes').tolist())[0]
-        masks = result['masks'].cpu().numpy().astype(bool)
-        order = np.argsort(-result['scores'].cpu().numpy())
-        return masks[order]
 
 
 def detect_2d(image, segmenter):

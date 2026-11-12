@@ -38,7 +38,9 @@ _ARRIVAL_TOLERANCE = np.deg2rad(0.5)
 _HOME_QS_DEG = (-6.28, -10.91, 132.23, 0.0, 58.68, -36.28)
 
 
-def _build():
+def _build(obstacles=()):
+    """``obstacles``: more scene objects (with collision) to keep the
+    sampler off, e.g. stand-ins for the platform."""
     _, picker, sampler = mobisys()
 
     # the picker only ever gets read: one pose, then the socket goes away. It
@@ -57,13 +59,15 @@ def _build():
                   f'{np.round(np.degrees(qs2), 2)} deg')
         except (OSError, BCapError) as exc:
             print(f'picker: read failed ({exc}) -- left at its sim pose')
-        reader.close()
+        reader.disconnect()
 
     ground = ossop.plane()
     collider = ocm.MJCollider()
     collider.append(sampler)
     collider.append(picker)
     collider.append(ground)
+    for obstacle in obstacles:
+        collider.append(obstacle)
     collider.actors = [sampler]
     collider.compile()
     pln_ctx = omppc.PlanningContext(collider=collider,
@@ -136,7 +140,7 @@ def home():
         return False
     finally:
         # close() powers the motors off and gives the arm back
-        cobotta.close()
+        cobotta.disconnect()
 
 
 if __name__ == '__main__':

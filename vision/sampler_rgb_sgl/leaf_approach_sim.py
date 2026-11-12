@@ -138,7 +138,7 @@ def execute(path, status):
         print(f'sampler: {exc} -- stopped')
         status['state'] = 'failed'
     finally:
-        cobotta.close()                 # motors off, arm given back
+        cobotta.disconnect()            # motors off, arm given back
 
 
 def show(frames, path, leaf_tf, cloud, picker_qs):

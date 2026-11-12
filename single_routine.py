@@ -2,7 +2,7 @@
 the capper and opens it, the sampler takes a leaf and drops it into the
 tube, the capper closes it, the picker pops the tube out and discards it.
 
-    picker (+ gripper, capper)              sampler (+ cutter, D405)
+    picker (+ gripper, capper)              sampler (+ cutter, stereo pair)
     --------------------------              ------------------------
     home (the start)                        home (the start)
     ---- both there: go on ------------------------------------------------
@@ -31,9 +31,11 @@ pointing down.
 
 FIRST A SIMULATION of the whole routine, from both robots' real joints:
 the same steps and handshakes, every move planned but only recorded, the
-grippers / capper / cutter only logged, the sampler's camera replaced by the
-frame of its last observation (``vision/d405/observe/``; the look again
-keeps the first estimate). The viewer loops it -- 0: both to their start,
+grippers / capper / cutter only logged, the sampler's stereo pair replaced
+by the raw pairs the last real run saved (``vision/sampler_stereo/observe/``:
+``plant_``, then the look's, then ``relook_``; SAM 3 and the depth run on
+them as on the real frames) and the picker's look at the cap by a long tab
+at SIM_TAB_DEG (only the grip's plan is checked). The viewer loops it -- 0: both to their start,
 A: both until CAP_OPEN, B: the sampler storing the leaf, C: the sampler
 retreating while the picker pops and discards. A step that fails in the
 simulation is printed and nothing can be run. 'g' in the viewer window then runs it on the real cell
@@ -55,14 +57,17 @@ off (a held leaf drops).
     py -3.12 coripps/single_routine.py --tube 3
 """
 
+import os
 import sys
 import time
 import argparse
 import threading
 
+import cv2
 import numpy as np
 
 from one.drivers.cobotta import BCapError, Cobotta
+import one.motion.probabilistic.rrt as ompr
 
 import coripps.tool.tube.pick_cap_store as pcs
 from coripps.end_effectors.xh430_capper.exec import (XH430CapperExec,
@@ -71,9 +76,10 @@ from coripps.robots.leaf_sampler import LeafSampler
 from coripps.robots.tube_picker import TubePicker
 from coripps.tool.home_sampler import _HOME_QS_DEG as SAMPLER_HOME_QS_DEG
 from coripps.tool.leaf.suc_cut_store import LeafSession
-from coripps.tool.tube.home_picker import HOME_QS_DEG
+from coripps.tool.home_picker import HOME_QS_DEG
 from coripps.tool.tube.pick_sequence_single import PickSession
-from coripps.vision.d405 import leaf_pipeline as lp
+from coripps.vision.sampler_stereo import depth as sd
+from coripps.vision.sampler_stereo import leaf_pipeline as lp
 
 
 RETREAT_SPEED = 100.0                       # %, both robots going home
@@ -82,8 +88,13 @@ RETRY_PERIOD = 0.5                          # s, re-planning while blocked
 PLAY_INTERVAL = 1 / 30.0                    # s, the animation
 HOLD_FRAMES = 30                            # held at the end of the loop
 FOLLOW_INTERVAL = 0.1                       # s, the real arms on screen
+PLAY_STEP = np.deg2rad(1.0)                 # rad per drawn frame
+SIM_TAB_DEG = 0.0                           # the simulation's cap long tab
 _SAMPLER_HOST = '192.168.0.101'
 _PICKER_HOST = '192.168.0.102'
+READ_TIMEOUT = 10.0                         # s, a kept joint reader
+_READERS = {}                               # host -> its kept Cobotta
+_READERS_LOCK = threading.Lock()
 
 
 class Shared:
@@ -113,8 +124,37 @@ class Shared:
 
 
 def read_qs(host, ndof):
-    with Cobotta(host) as reader:
-        return reader.joint_angles(ndof=ndof)
+    """``host``'s joints, by a connection kept open for it: a new one costs
+    0.2-1.2 s, past its timeout when the controller is busy moving; reopened
+    once when it fails."""
+    with _READERS_LOCK:
+        for attempt in (0, 1):
+            reader = _READERS.get(host)
+            try:
+                if reader is None:
+                    reader = _READERS[host] = Cobotta(
+                        host, timeout=READ_TIMEOUT).connect()
+                return reader.joint_angles(ndof=ndof)
+            except (OSError, BCapError):
+                _READERS.pop(host, None)
+                if reader is not None:
+                    try:
+                        reader.disconnect()
+                    except (OSError, BCapError):
+                        pass
+                if attempt:
+                    raise
+
+
+def close_readers():
+    """Close :func:`read_qs`'s connections."""
+    with _READERS_LOCK:
+        for reader in _READERS.values():
+            try:
+                reader.disconnect()
+            except (OSError, BCapError):
+                pass
+        _READERS.clear()
 
 
 def refresh_other(shared, pln_ctx, other_cls, host):
@@ -336,6 +376,45 @@ class _SimCutter:
             f'cutter {name}{args if args else ""}')
 
 
+class _ReplayEye(lp.Eye):
+    """The sampler's eye in the simulation: the raw pairs the last real run
+    saved to ``observe/``, one per frame in the order the steps take them
+    (find the plant, look, look again), rectified and matched as live."""
+
+    PREFIXES = ('plant_', '', 'relook_')
+
+    def __init__(self):
+        self.rect = sd.rectifier()
+        self.K = self.rect.K
+        self.size = self.rect.size
+        self.rows = None
+        self.cam = self
+        self._next = 0
+
+    def frames(self):
+        if self._next >= len(self.PREFIXES):
+            raise RuntimeError('simulation: no saved pair left to replay')
+        prefix = self.PREFIXES[self._next]
+        self._next += 1
+        pair = []
+        for side in ('left', 'right'):
+            name = os.path.join(lp.OBSERVE_DIR, f'{prefix}pair_{side}.png')
+            pic = cv2.imread(name)
+            if pic is None:
+                raise RuntimeError(f'simulation: {name} missing -- run the '
+                                   'sampler once for real')
+            pair.append(pic)
+        return tuple(pair)
+
+    def close(self):
+        pass
+
+
+def densify(path, pln_ctx):
+    return ompr.densify_path([np.asarray(q, np.float32) for q in path],
+                             pln_ctx, max_step=PLAY_STEP)
+
+
 def simulate(picker, sampler, plan):
     """The whole routine in simulation (module doc). ``(phases, ok)``:
     phases 0, A-D as ``(picker frames, sampler frames)``. The sessions are put
@@ -344,37 +423,32 @@ def simulate(picker, sampler, plan):
     frames = {'p': [np.asarray(sim['p'], np.float32)],
               's': [np.asarray(sim['s'], np.float32)]}
     marks, log = {}, []
-    color, depth, K, obs_qs = lp.load_observation()
 
     def p_play(name, waypoints, speed=None):
-        frames['p'] += lp.densify(waypoints)[1:]
+        frames['p'] += densify(waypoints, picker.pln_ctx)[1:]
         sim['p'] = np.asarray(waypoints[-1], np.float32)
         return True
 
-    def s_run(path, speed, what):
-        frames['s'] += lp.densify(path)[1:]
-        sim['s'] = np.asarray(path[-1], np.float32)
+    def p_look():
+        print(f'  simulation: the long tab taken at {SIM_TAB_DEG:.0f} deg')
+        return SIM_TAB_DEG
 
-    def s_observe():                    # to where the saved frame was taken
-        path = lp.plan(sampler.pln_ctx, sampler.qs_now(),
-                       sampler.pln_ctx.enforce_bounds(obs_qs))
-        if path is None:
-            raise RuntimeError('observe: no path to the saved frame\'s pose')
-        return ('to the observation pose (the saved frame\'s)',
-                lambda: s_run(path, None, 'observe'))
+    def s_run(path, speed, what):
+        frames['s'] += densify(path, sampler.pln_ctx)[1:]
+        sim['s'] = np.asarray(path[-1], np.float32)
 
     patches = [(picker, 'real_qs', lambda: picker.pln_ctx.enforce_bounds(
                     sim['p'].copy())),
                (picker, 'play', p_play),
                (picker, 'work_gripper',
                 lambda verb: log.append(f'gripper {verb}') or True),
+               (picker, 'look', p_look),
                (sampler, 'qs_now', lambda: sampler.pln_ctx.enforce_bounds(
                    sim['s'].copy())),
                (sampler, 'run', s_run),
-               (sampler, 'frame', lambda: (color, depth, K)),
-               (sampler, 's_observe', s_observe),
+               (sampler, 'eye', _ReplayEye()),
                (sampler, 'cutter', _SimCutter(log)),
-               (lp, 'relook', lambda job, old: (old, None))]
+               (lp, 'save_frame', lambda *args, **kwargs: None)]
     saved = [(obj, name, obj.__dict__.get(name)) for obj, name, _ in patches]
     for obj, name, value in patches:
         setattr(obj, name, value)
@@ -506,7 +580,7 @@ def main(tube=pcs.TUBE_INDEX):
         sampler = LeafSession()
     except Exception as exc:
         print(f'sampler: cannot start: {exc}')
-        capper.close()
+        capper.disconnect()
         picker.release()
         return False
     pcs.print_plan(plan)
@@ -533,8 +607,9 @@ def main(tube=pcs.TUBE_INDEX):
         return done
     finally:
         sampler.close()                 # ultrasonic / vacuum off, arm back
-        capper.close()                  # the port only
+        capper.disconnect()             # the port only
         picker.release()                # arm back; the gripper port only
+        close_readers()
 
 
 if __name__ == '__main__':

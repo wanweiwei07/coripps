@@ -39,6 +39,7 @@ Usage::
     py -3.12 coripps/end_effectors/xh430_cutter/exec.py angle 75     # link1 degrees
     py -3.12 coripps/end_effectors/xh430_cutter/exec.py cycle -n 5
     py -3.12 coripps/end_effectors/xh430_cutter/exec.py release      # torque off
+    py -3.12 coripps/end_effectors/xh430_cutter/exec.py seal         # vacuum sensor live
     py -3.12 coripps/end_effectors/xh430_cutter/exec.py ports        # list adapters
 
 The port is found by the USB adapter's serial number (``usb_serial``), so the
@@ -90,6 +91,9 @@ class Config:
     baud: int = 57600
     dxl_id: int = 1
     dio_device: str = 'DIO000'  # CONTEC board: ultrasonic relay + vacuum
+    # the vacuum pressure sensor (CKD PPX-R01P, PNP) output 1 on this DIO
+    # input: ON once the nozzle is sealed (its threshold set on the sensor)
+    seal_input: int = 0
 
     # Servo-dial angle (deg, 0..360 over one turn) with the blade retracted,
     # i.e. q = 0. Deployed is this + travel_deg.
@@ -145,19 +149,19 @@ class XH430CutterExec:
             self.setup()
         return self
 
-    def close(self):
+    def disconnect(self):
         """Close the board -- which switches EVERY output off, so the blade
         stops and the vacuum drops a held leaf -- and the servo port."""
         try:
             self.dio.close()
         finally:
-            self.dxl.close()
+            self.dxl.disconnect()
 
     def __enter__(self):
         return self.connect()
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        self.close()
+        self.disconnect()
 
     def setup(self):
         """Current-based position control, a gentle profile, torque ON.
@@ -192,6 +196,11 @@ class XH430CutterExec:
         off, ``'off'`` stops both (the driver interlocks suck / blow)."""
         self.dio.vacuum_generator(mode)
         print(f'cutter: vacuum {mode}')
+
+    def sealed(self):
+        """True while the vacuum sensor reads the nozzle sealed (a leaf on
+        it) -- its output past the threshold set on the sensor."""
+        return self.dio.input(self.cfg.seal_input)
 
     # ---- state ------------------------------------------------------------
     def servo_deg(self):
@@ -295,6 +304,22 @@ def _cmd_cycle(cutter, args):
     cutter.status()
 
 
+def _cmd_seal(cutter, args):
+    """Suck and show the seal input live for ``args.seconds`` -- cover the
+    nozzle with a finger to see it turn on -- then vacuum off."""
+    cutter.vacuum('suck')
+    try:
+        t0, last = time.time(), None
+        while time.time() - t0 < args.seconds:
+            now = cutter.sealed()
+            if now != last:
+                print(f'{time.time() - t0:6.2f} s  sealed: {now}')
+                last = now
+            time.sleep(0.02)
+    finally:
+        cutter.vacuum('off')
+
+
 def _cmd_release(cutter, args):
     cutter.release()
 
@@ -333,6 +358,10 @@ def build_parser():
     p.add_argument('-n', type=int, default=3)
     p.add_argument('--dwell', type=float, default=0.5)
 
+    p = add('seal', 'suck and show the vacuum sensor live (cover the nozzle)',
+            func=_cmd_seal, setup=False)
+    p.add_argument('--seconds', type=float, default=15.0)
+
     add('release', 'torque off', func=_cmd_release, setup=False)
     add('clear', 'report and reboot out of a hardware error', func=_cmd_clear,
         setup=False, check_error=False)
@@ -359,7 +388,7 @@ def main(argv=None):
         print(f'cutter: {exc}')
         return 1
     finally:
-        cutter.close()
+        cutter.disconnect()
     return 0
 
 

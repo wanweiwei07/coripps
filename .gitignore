@@ -3,3 +3,12 @@ __pycache__/
 *.npz
 .vscode/
 .idea/
+/ir_data/
+
+# captured data (results live in config/*.json)
+vision/**/calib_images*/
+vision/**/handeye_images*/
+vision/**/survey_images/
+vision/**/observe/
+vision/picker_rgb/samples/
+*.npy

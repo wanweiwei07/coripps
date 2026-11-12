@@ -105,14 +105,14 @@ class XH430CapperExec:
             self.setup()
         return self
 
-    def close(self):
-        self.dxl.close()
+    def disconnect(self):
+        self.dxl.disconnect()
 
     def __enter__(self):
         return self.connect()
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        self.close()
+        self.disconnect()
 
     def setup(self):
         """Current-based position control, a gentle profile, torque ON.
@@ -260,7 +260,7 @@ def main(argv=None):
         print(f'capper: {exc}')
         return 1
     finally:
-        capper.close()
+        capper.disconnect()
     return 0
 
 

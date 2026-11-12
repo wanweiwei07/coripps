@@ -67,7 +67,7 @@ def show_real_state():
             qs = cobotta.joint_angles(ndof=robot.ndof)
         except (OSError, BCapError) as exc:
             print(f"{link['label']}: lost {cobotta.host} ({exc}) -- polling stopped")
-            cobotta.close()
+            cobotta.disconnect()
             return False
         robot.fk(qs=qs)
         last_qs = link['last_qs']

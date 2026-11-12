@@ -2,14 +2,16 @@
 
 Headless: no viewer. Each ``g`` runs exactly one step, then waits::
 
-    1-6  the pick of ``pick_sequence_single`` (... -> close -> lift)
-    7    move to the drop point, the tube still held
-    8    lower straight down by ``layout_cap.PLACE_DESCEND``, still holding the
+    1-7  the pick of ``pick_sequence_single``: to pre_pick, look at the cap
+         (its long tab's direction), plan the grip, open, turn the hand to
+         it, down to the cap, close, lift
+    8    carry it to the drop point, turned on the way so its long tab
+         points to -y (``layout_cap.PLACINGS``: the hand's x towards the
+         long tab or away, as it was gripped)
+    9    lower straight down by ``layout_cap.PLACE_DESCEND``, still holding the
          tube -- it goes into the store instead of being dropped from the air
-    9    open the gripper -- let go of the placed tube
-    10   slide ``layout_cap.RELEASE_SHIFT`` along the TCP's own +x (the
-         open blades leave the tube sideways), then rise straight up by
-         ``layout_cap.RELEASE_RISE``
+    10   open the gripper -- let go of the placed tube, then rise straight up
+         by ``layout_cap.RELEASE_RISE``
     11   close the gripper again
     12   move to the push start ``layout_cap.PUSH_POS`` -- over the back of
          the tube, just above it -- in ``layout_cap.PUSH_ROTMAT``
@@ -23,8 +25,10 @@ Headless: no viewer. Each ``g`` runs exactly one step, then waits::
          ``layout_cap.POP_ROTMAT``.
          MEANWHILE the capper opens the cap, presses it shut again and moves
          to its stopper position; the step ends when both are done
-    16   press straight down by ``layout_cap.POP_DIST`` at :data:`POP_SPEED`
-         on the lever, prying the tube out of the capper
+    16   press straight down by ``layout_cap.POP_DIST`` on the lever,
+         prying the tube out of the capper: the first
+         ``layout_cap.POP_FAST_DIST`` (down to the lever) at
+         :data:`POP_FAST_SPEED`, the rest (the press) at :data:`POP_SPEED`
     17   retract straight back up from the lever (the press, reversed)
     18   move the capper back home, ready for the next tube
     19   open the gripper
@@ -36,17 +40,17 @@ Headless: no viewer. Each ``g`` runs exactly one step, then waits::
     23   retract straight back up to the re-pick point, the tube held
     24   carry it to the discard point ``layout_cap.DISCARD_POS``
     25   open the gripper -- the tube drops into the bin
-    26   move on: to the NEXT tube's pre_pick_high when there is one, else to
+    26   move on: to the NEXT tube's pre_pick when there is one, else to
          the picker's home pose (``home_picker``)
 
-Execution only: every pose and path comes from ``config/poses_cap.json``,
-solved by ``precompute_poses_cap.py`` from ``layout_cap`` (the positions and
-distances live there). Only the PLACING (steps 7-10) follows the tube's
-own pick orientation; the push, the pop, the re-pick of the popped tube and
-the discard are FIXED poses of the cell, the same for every tube. Before
-anything moves the loaded paths are re-checked against the REAL sampler pose
--- no IK at run time. The tube, the store and the lever are not in the
-collision model.
+The pick is solved at run time (the grip follows the cap); every pose and
+path after it comes from ``config/poses_cap.json``, solved by
+``precompute_poses_cap.py`` from ``layout_cap`` (the positions and distances
+live there). The placing (steps 8-10) is one of two sets, by the hand's
+orientation; the push, the pop, the re-pick of the popped tube and the
+discard are FIXED poses of the cell, the same for every tube. Before anything
+moves the loaded paths are re-checked against the REAL sampler pose. The
+tube, the store and the lever are not in the collision model.
 
 The capper runs in its own thread: the arm is a b-CAP socket, the capper a
 separate serial port, so the two share nothing.
@@ -69,7 +73,7 @@ import numpy as np
 import coripps.picker_motion as pkm
 import coripps.tool.tube.layout_cap as cap
 import coripps.tool.tube.poses_io_cap as cpio
-from coripps.tool.tube.home_picker import HOME_QS_DEG
+from coripps.tool.home_picker import HOME_QS_DEG
 from coripps.tool.tube.pick_sequence_single import PickSession
 from coripps.end_effectors.xh430_capper.exec import (XH430CapperExec,
                                                      DynamixelError)
@@ -78,13 +82,15 @@ from coripps.end_effectors.xh430_capper.exec import (XH430CapperExec,
 TUBE_INDEX = 0
 # Speeds (percent) by kind of move:
 FREE_SPEED = 100.0   # steps 1, 14, 15, 26: nothing touched or carried
-NEAR_SPEED = 100.0    # steps 3, 4, 6, 8, 10, 12, 17, 20, 21, 23: into / out
-                     # of a tube, the lift, placing and leaving it, the push
+NEAR_SPEED = 100.0    # steps 4, 5, 7, 9, 10, 12, 17, 20, 21, 23: onto / off
+                     # a cap, the lift, placing and leaving it, the push
                      # start
-CARRY_SPEED = 100.0   # steps 7, 24: carrying a tube
+CARRY_SPEED = 100.0   # steps 8, 24: carrying a tube
 PUSH_SPEED = 3.0     # step 13: a slow push keeps the contact torque under the
                      # collision detection threshold
 POP_SPEED = 5.0      # step 16: pressing the lever, in contact as well
+POP_FAST_SPEED = 100.0  # step 16: the first layout_cap.POP_FAST_DIST, down to
+                        # the lever, nothing touched yet
 
 
 def load_cap_poses(session):
@@ -142,11 +148,11 @@ def capper_home(capper):
 
 def solve_after(session, next_tube):
     """Where the arm goes once the tube is discarded: ``(label, qs)`` --
-    ``next_tube``'s pre_pick_high, or home when it is None. None when that
-    pose is itself in collision."""
+    ``next_tube``'s pre_pick, or home when it is None. None when that pose
+    is itself in collision."""
     if next_tube is not None:
-        label = f'tube {next_tube} pre_pick_high'
-        goal = session.paths[next_tube][session.marks[0]]
+        label = f'tube {next_tube} pre_pick'
+        goal = session.look_qs_all[next_tube]
     else:
         label = 'home'
         goal = session.pln_ctx.enforce_bounds(
@@ -159,23 +165,32 @@ def solve_after(session, next_tube):
 
 def plan_tube(session, cap_poses, next_tube):
     """The selected tube's run from the loaded cap poses: a dict, or None
-    (with the reason printed) when an orientation was not solved or a
-    pose / path collides with the REAL cell. Nothing moves, nothing is
-    solved; ``next_tube`` (or None for home) is where the run ends.
+    (with the reason printed) when a placing was not solved or a pose / path
+    collides with the REAL cell. Nothing moves, nothing is solved;
+    ``next_tube`` (or None for home) is where the run ends.
 
-    The placing uses the set of the tube's own pick orientation; everything
-    after it is the fixed set.
+    Both placings are kept -- which one is the tube's is known only once its
+    cap is looked at (step 2); everything after them is the fixed set.
     """
     orientations, fixed = cap_poses
-    name = cap.orientation_of(session.rotmat)
-    if name not in orientations:
-        print(f'tube {session.tube}: no cap poses for the {name} pick '
-              'orientation -- re-run tool/precompute_poses_cap.py')
+    missing = [name for name in cap.PLACINGS if name not in orientations]
+    if missing:
+        print(f'no cap poses for the placings {missing} -- re-run '
+              'tool/precompute_poses_cap.py')
         return None
-    entry = orientations[name]
     ctx = session.pln_ctx
-    for label, qs in (('drop', entry['drop']),
-                      ('push start', fixed['push_top']),
+    for name, entry in orientations.items():
+        if not ctx.is_state_valid(entry['drop']):
+            print(f'tube {session.tube}: the {name} drop pose collides with '
+                  'the cell as it is now')
+            return None
+        for label, path in (('placing', entry['place']),
+                            ('rise after the release', entry['release'])):
+            if not pkm.local_sequence_valid(ctx, path):
+                print(f'tube {session.tube}: the {name} {label} collides '
+                      'with the cell as it is now')
+                return None
+    for label, qs in (('push start', fixed['push_top']),
                       ('pop', fixed['pop']),
                       ('re-pick', fixed['repick_top']),
                       ('discard', fixed['discard'])):
@@ -183,10 +198,7 @@ def plan_tube(session, cap_poses, next_tube):
             print(f'tube {session.tube}: the {label} pose collides with the '
                   'cell as it is now')
             return None
-    for label, path in (('placing', entry['place']),
-                        ('slide-out and rise after the release',
-                         entry['release']),
-                        ('push', fixed['push']),
+    for label, path in (('push', fixed['push']),
                         ('lever press', fixed['press']),
                         ('re-pick descent', fixed['repick'])):
         if not pkm.local_sequence_valid(ctx, path):
@@ -196,17 +208,16 @@ def plan_tube(session, cap_poses, next_tube):
     after = solve_after(session, next_tube)
     if after is None:
         return None
-    return {'orientation': name, 'drop_pos': cap.ORIENTATIONS[name][1],
-            'drop': entry['drop'], 'place': entry['place'],
-            'release': entry['release'], **fixed, 'after': after}
+    return {'placings': orientations, **fixed, 'after': after}
 
 
 def print_plan(plan):
     deg = lambda qs: np.round(np.degrees(qs), 2)
-    print(f'  {"drop":14s} {deg(plan["drop"])} deg  ({plan["orientation"]}, '
-          f'grasp_center at {np.round(plan["drop_pos"] * 1000, 2)} mm)')
-    print(f'  {"placed":14s} {deg(plan["place"][-1])} deg  '
-          f'({cap.PLACE_DESCEND * 1000:.1f} mm down)')
+    for name, entry in plan['placings'].items():
+        print(f'  {"drop " + name:14s} {deg(entry["drop"])} deg  '
+              f'(grasp_center at {np.round(cap.DROP_POS * 1000, 2)} mm)')
+        print(f'  {"placed " + name:14s} {deg(entry["place"][-1])} deg  '
+              f'({cap.PLACE_DESCEND * 1000:.1f} mm down)')
     print(f'  {"push start":14s} {deg(plan["push_top"])} deg  '
           f'({np.round(cap.PUSH_POS * 1000, 1)} mm)')
     print(f'  {"pushed":14s} {deg(plan["push"][-1])} deg  '
@@ -223,27 +234,57 @@ def print_plan(plan):
     print(f'  then -> {after_label}: {deg(after_qs)} deg')
 
 
+def split_press(session, press):
+    """The lever press path in two: ``(fast, slow)`` -- the samples down
+    to the last one no further than ``layout_cap.POP_FAST_DIST``, and from
+    there on (they share that sample)."""
+    tcp = session.picker.gripper.tcp('grasp_center')
+    zs = []
+    for qs in press:
+        session.picker.fk(qs=qs)
+        zs.append(float(tcp.tf[2, 3]))
+    down = zs[0] - np.asarray(zs)
+    k = max(1, int(np.nonzero(down <= cap.POP_FAST_DIST + 1e-6)[0][-1]))
+    return press[:k + 1], press[k:]
+
+
+def press_lever(session, press):
+    """Step 16: down to the lever fast, then the press slow."""
+    fast, slow = split_press(session, press)
+    return (session.follow_path('over the lever', fast,
+                                speed=POP_FAST_SPEED)
+            and session.follow_path('the lever pressed', slow,
+                                    speed=POP_SPEED))
+
+
 def tube_steps(session, capper, plan):
     """The selected tube's full run as ``(label, step)`` pairs."""
-    drop, place, push = plan['drop'], plan['place'], plan['push']
-    press, after_label, after_qs = plan['press'], *plan['after']
+    push, press = plan['push'], plan['press']
+    after_label, after_qs = plan['after']
+
+    def placing(key):
+        # the tube's placing, known once step 2 has planned its grip
+        name = cap.placing_of(session.grip['flip'])
+        return plan['placings'][name][key]
+
+    def let_go():
+        return (session.work_gripper('open')
+                and session.follow_path('released', placing('release'),
+                                        speed=NEAR_SPEED))
+
     return session.pick_steps(free_speed=FREE_SPEED,
                               near_speed=NEAR_SPEED) + [
-        # step 7
-        ('move to the drop point',
-         lambda: session.transfer_to('the drop point', drop,
-                                     speed=CARRY_SPEED)),
         # step 8
-        (f'lower {cap.PLACE_DESCEND * 1000:.0f} mm -- place the tube',
-         lambda: session.follow_path('placed', place, speed=NEAR_SPEED)),
+        ('carry it to the drop point, turned: the long tab to -y',
+         lambda: session.transfer_to('the drop point', placing('drop'),
+                                     speed=CARRY_SPEED, held=True)),
         # step 9
-        ('open the gripper -- let go of the tube',
-         lambda: session.work_gripper('open')),
-        # step 10
-        (f'slide {cap.RELEASE_SHIFT * 1000:.0f} mm along the TCP x, then '
-         f'rise {cap.RELEASE_RISE * 1000:.0f} mm',
-         lambda: session.follow_path('released', plan['release'],
+        (f'lower {cap.PLACE_DESCEND * 1000:.0f} mm -- place the tube',
+         lambda: session.follow_path('placed', placing('place'),
                                      speed=NEAR_SPEED)),
+        # step 10
+        (f'open the gripper -- let go of the tube, rise '
+         f'{cap.RELEASE_RISE * 1000:.0f} mm', let_go),
         # step 11
         ('close the gripper', lambda: session.work_gripper('close')),
         # step 12
@@ -263,10 +304,10 @@ def tube_steps(session, capper, plan):
          'and goes to the stopper meanwhile',
          lambda: pop_and_cap(session, capper, plan['pop'])),
         # step 16
-        (f'press {cap.POP_DIST * 1000:.0f} mm down on the lever at '
-         f'{POP_SPEED:.0f}%',
-         lambda: session.follow_path('the lever pressed', press,
-                                     speed=POP_SPEED)),
+        (f'press {cap.POP_DIST * 1000:.0f} mm down on the lever: '
+         f'{cap.POP_FAST_DIST * 1000:.0f} mm at {POP_FAST_SPEED:.0f}%, the '
+         f'rest at {POP_SPEED:.0f}%',
+         lambda: press_lever(session, press)),
         # step 17
         ('retract from the lever',
          lambda: session.follow_path('the pop position', press[::-1],
@@ -284,8 +325,7 @@ def tube_steps(session, capper, plan):
          lambda: session.follow_path('the popped tube', plan['repick'],
                                      speed=NEAR_SPEED)),
         # step 22
-        ('close the gripper -- grip the popped tube',
-         lambda: session.work_gripper('close')),
+        ('close the gripper -- grip the popped tube', session.grip_tube),
         # step 23
         ('retract to the re-pick point with the tube',
          lambda: session.follow_path('the re-pick point',
@@ -294,7 +334,7 @@ def tube_steps(session, capper, plan):
         # step 24
         ('carry it to the discard point',
          lambda: session.transfer_to('the discard point', plan['discard'],
-                                     speed=CARRY_SPEED)),
+                                     speed=CARRY_SPEED, held=True)),
         # step 25
         ('open the gripper -- discard the tube',
          lambda: session.work_gripper('open')),
@@ -312,7 +352,7 @@ def main(tube=TUBE_INDEX):
         print(exc)
         return False
     cap_poses = load_cap_poses(session)
-    next_tube = tube + 1 if tube + 1 < len(session.paths) else None
+    next_tube = tube + 1 if tube + 1 < len(session.points) else None
     plan = None if cap_poses is None else plan_tube(session, cap_poses,
                                                     next_tube)
     capper = None
@@ -328,12 +368,12 @@ def main(tube=TUBE_INDEX):
     try:
         return session.run(tube_steps(session, capper, plan))
     finally:
-        capper.close()                  # the port only: a pressed cap stays
+        capper.disconnect()             # the port only: a pressed cap stays
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument('--tube', type=int, default=TUBE_INDEX,
-                        help=f'precomputed pick index (default {TUBE_INDEX})')
+                        help=f'pick point index (default {TUBE_INDEX})')
     args = parser.parse_args()
     sys.exit(0 if main(tube=args.tube) else 1)

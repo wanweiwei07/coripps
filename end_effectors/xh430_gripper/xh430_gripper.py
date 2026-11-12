@@ -53,8 +53,18 @@ _PAD_PHI = float(np.arcsin((_REST_HALF_GAP - _HINGE_Y) / _PAD_R))
 TRAVEL = np.deg2rad(16.0)
 OPEN_TRAVEL = np.deg2rad(10.0)    # working 'open': clears a tube without
                                   # driving the linkage to its limit
-# grasp center: on the mount axis, at the tip-pad height
-_GRASP_CENTER = (-0.005, 0.0, 0.0997)
+CAMERA_OPEN_TRAVEL = np.deg2rad(15.0)  # opened for the camera: wider, the
+                                       # fingers out of its view of a cap
+                                       # below (1 deg short of the limit);
+                                       # back to OPEN_TRAVEL after the picture
+# grasp center: where a held tube's axis really is, at the tip-pad height --
+# measured by the picker's camera on a held cap, constant in this frame
+# whichever way the hand turned (0 / 180 deg: x -0.84 / -1.08, y -3.05 /
+# -2.82 mm), so ~1 mm and ~3 mm off the mount axis
+# _GRASP_CENTER = (-0.001, -0.002, 0.095)
+# _GRASP_CENTER = (-0.00125, -0.0015, 0.095)
+# _GRASP_CENTER = (-0.00085, -0.00318, 0.095)
+_GRASP_CENTER = (-0.00057, -0.00311, 0.095)
 
 
 def _half_gap(q):

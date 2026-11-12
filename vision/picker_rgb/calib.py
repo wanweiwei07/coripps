@@ -24,7 +24,9 @@ from one.vision.calibrate import lens
 from one.vision.calibrate import handeye as che
 
 
-PORT = 3                       # hub port of the picker camera
+PORT = (3, 3)                  # hub port of the picker camera, on the hub
+                               # on port 3 (the sampler's right one is
+                               # also on a port 3: cameras.index_of)
 LABEL = 'picker camera'
 _HERE = os.path.dirname(os.path.abspath(__file__))
 # coripps/config (this file is coripps/vision/<camera>/calib.py)
@@ -34,6 +36,10 @@ HANDEYE_DIR = os.path.join(_HERE, 'handeye_images')
 INTRINSICS_PATH = os.path.join(CONFIG_DIR, 'picker_cam_intrinsics.json')
 HANDEYE_PATH = os.path.join(CONFIG_DIR, 'picker_cam_handeye.json')
 _ROBOT = 1                      # mobisys(): (base, picker, sampler)
+# hand-eye views: the lens is focused near (the caps at pre_pick), the
+# board blurs past ~15 cm -- so close, and the board then only partly fits
+HANDEYE_DISTANCES = (0.10, 0.12)   # m, camera to board centre
+HANDEYE_IN_VIEW = 0.5              # share of the corners in the picture
 
 
 def load_intrinsics():
@@ -59,11 +65,12 @@ def flange_tfs(qs_list):
 def session_args(data_dir=HANDEYE_DIR):
     """The arguments of a ``handeye_capture.Session`` on the picker with
     this camera, recording into ``data_dir``."""
-    from coripps.tool.tube.home_picker import _build, _PICKER_HOST
+    from coripps.tool.home_picker import _build, _PICKER_HOST
     from one.vision.calibrate.handeye_capture import WebCam
     return dict(build=_build, host=_PICKER_HOST,
                 camera=WebCam(PORT, LABEL), detector=detector(),
-                data_dir=data_dir)
+                data_dir=data_dir, distances=HANDEYE_DISTANCES,
+                in_view=HANDEYE_IN_VIEW)
 
 
 def capture_lens():

@@ -91,7 +91,7 @@ def browse(path=ppio.PICK_POSES_JSON):
         print(f'pick {point_idx + 1}/{len(valid_points)} '
               f'pose {pose_idx + 1}/{len(ppio.POSE_NAMES)} '
               f'{ppio.POSE_NAMES[pose_idx]} '
-              f'{"no_yaw" if layout.is_no_yaw(rotmat) else "yaw"} '
+              f'from {layout.approach_of(rotmat)} '
               f'tcp={np.round(points[pose_idx], 4)}')
 
     def step(dt):

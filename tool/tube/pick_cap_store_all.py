@@ -3,13 +3,17 @@
 Headless: no viewer. The arm, the gripper and the capper are connected once
 and stay connected across tubes. Each tube is the full ``pick_cap_store``
 run (pick, place, push, cap, pop, discard); its last step moves straight on
-to the next tube's pre_pick_high, and after the last tube to home.
+to the next tube's pre_pick, and after the last tube to home.
 
 Before anything moves, EVERY tube is planned from ``config/poses_cap.json``
 (see ``precompute_poses_cap``): a tube that cannot be run (its orientation
 was not solved, or a pose collides with the cell as it is now) is skipped
 and listed, and the tube before it moves on to the next one that can.
 Nothing has moved yet, so skipping is harmless.
+
+Each tube's cap is looked at from above before it is picked (see
+``pick_cap_store``): SAM 3 and the cap template are loaded once, before
+anything moves.
 
 Each step waits for ``g``; with ``--c`` they run back to back without
 waiting. Either way ``q`` (or Esc / Ctrl+C) stops -- in ``--c`` mode before
@@ -21,8 +25,10 @@ printout says which tube to restart from with ``--start``.
     py -3.12 coripps/tool/tube/pick_cap_store_all.py
     py -3.12 coripps/tool/tube/pick_cap_store_all.py --start 12
     py -3.12 coripps/tool/tube/pick_cap_store_all.py --c          # no 'g'
+    py -3.12 coripps/tool/tube/pick_cap_store_all.py --c12   # --c --start 12
 """
 
+import re
 import sys
 import argparse
 
@@ -37,7 +43,7 @@ def plan_all(session, cap_poses, start):
     runnable ones, each ending at the NEXT runnable tube (home after the
     last)."""
     runnable = []
-    for tube in range(start, len(session.paths)):
+    for tube in range(start, len(session.points)):
         try:
             session.select(tube, verbose=False)
         except RuntimeError as exc:
@@ -70,7 +76,7 @@ def main(start=0, continuous=False):
     if cap_poses is None:
         session.release()
         return False
-    print(f'planning tubes {start}..{len(session.paths) - 1} ...')
+    print(f'planning tubes {start}..{len(session.points) - 1} ...')
     plans = plan_all(session, cap_poses, start)
     if not plans:
         print('no tube can be run')
@@ -110,16 +116,28 @@ def main(start=0, continuous=False):
             print('\nall tubes done')
     finally:
         session.release()
-        capper.close()                  # the port only: a pressed cap stays
+        capper.disconnect()             # the port only: a pressed cap stays
     return ok
+
+
+def expand_c_start(argv):
+    """``--cN`` -> ``--c --start N`` (continuous, from tube N)."""
+    out = []
+    for arg in argv:
+        m = re.fullmatch(r'--c(\d+)', arg)
+        out += ['--c', '--start', m.group(1)] if m else [arg]
+    return out
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument('--start', type=int, default=0,
-                        help='first precomputed pick index to run (default 0)')
+                        help='first pick point index to run (default 0)')
     parser.add_argument('--c', action='store_true',
                         help="continuous: run every step without waiting "
-                             "for 'g' (q still stops)")
-    args = parser.parse_args()
+                             "for 'g' (q still stops); --cN = --c --start N")
+    argv = expand_c_start(sys.argv[1:])
+    if argv.count('--start') > 1:
+        parser.error('the first tube given twice (--cN and --start)')
+    args = parser.parse_args(argv)
     sys.exit(0 if main(start=args.start, continuous=args.c) else 1)

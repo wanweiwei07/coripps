@@ -101,7 +101,7 @@ def main():
         cam.close()
         for _, cobotta in links:
             if cobotta is not None:
-                cobotta.close()
+                cobotta.disconnect()
 
 
 if __name__ == '__main__':

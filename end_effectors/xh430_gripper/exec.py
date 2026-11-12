@@ -48,7 +48,7 @@ From other code::
     from coripps.end_effectors.xh430_gripper.exec import XH430GripperExec
     with XH430GripperExec() as gripper:
         gripper.open()
-        gripper.close_jaws()
+        gripper.close()
 """
 
 import sys
@@ -86,6 +86,8 @@ class Config:
     travel_deg: float = float(np.degrees(xh430g.TRAVEL))
     # working open, taken FROM the sim model so the two cannot drift apart
     open_deg: float = float(np.degrees(xh430g.OPEN_TRAVEL))
+    # opened for the camera, wider: the fingers out of its view -- also FROM it
+    camera_open_deg: float = float(np.degrees(xh430g.CAMERA_OPEN_TRAVEL))
 
     # Current ceiling while moving. 2.69 mA per unit, so 200 units is ~540 mA
     # -- enough to close the blades, gentle enough to stall against a tube.
@@ -141,14 +143,14 @@ class XH430GripperExec:
             self.setup()
         return self
 
-    def close(self):
-        self.dxl.close()
+    def disconnect(self):
+        self.dxl.disconnect()
 
     def __enter__(self):
         return self.connect()
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        self.close()
+        self.disconnect()
 
     def setup(self):
         """Current-based position control, a gentle profile, torque ON.
@@ -251,7 +253,13 @@ class XH430GripperExec:
         """Open to the WORKING angle, not the mechanical limit."""
         return self.move_to_deg(self.cfg.open_deg, wait=wait)
 
-    def close_jaws(self, wait=True):
+    def open_for_camera(self, wait=True):
+        """Open wider than :meth:`open`, to clear the camera's view: the
+        fingers out of the picture while it looks at a cap below.
+        :meth:`open` again before gripping."""
+        return self.move_to_deg(self.cfg.camera_open_deg, wait=wait)
+
+    def close(self, wait=True):
         """Close all the way and hold.
 
         Closing IS a stall -- against the tube if there is one, against the
@@ -308,7 +316,7 @@ def _cmd_open(gripper, args):
 
 
 def _cmd_close(gripper, args):
-    gripper.close_jaws()
+    gripper.close()
     gripper.status()
 
 
@@ -328,7 +336,7 @@ def _cmd_cycle(gripper, args):
         opened = (gripper.angle_deg(), gripper.opening_mm(),
                   gripper.dxl.present_current_ma())
         time.sleep(args.dwell)
-        gripper.close_jaws()
+        gripper.close()
         shut = (gripper.angle_deg(), gripper.opening_mm(),
                 gripper.dxl.present_current_ma())
         time.sleep(args.dwell)
@@ -416,7 +424,7 @@ def main(argv=None):
         print(f'gripper: {exc}')
         return 1
     finally:
-        gripper.close()
+        gripper.disconnect()
     return 0
 
 

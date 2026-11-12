@@ -169,7 +169,7 @@ def observe(sampler, pln_ctx, tf_flange_cam):
         print(f'sampler: {exc} -- stopping')
         return None
     finally:
-        cobotta.close()                 # motors off, arm given back
+        cobotta.disconnect()            # motors off, arm given back
     cam = D405()
     try:
         color, depth, _ = cam.frames()
@@ -329,7 +329,7 @@ def run_path(path, speed, what):
         print(f'sampler: {exc} -- stopped')
         return False
     finally:
-        cobotta.close()
+        cobotta.disconnect()
 
 
 def relook(job, old):

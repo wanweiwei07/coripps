@@ -113,7 +113,7 @@ def freeze_sampler(sampler):
               'restart this script if it moves')
     except (OSError, BCapError) as exc:
         print(f'sampler: read failed ({exc}) -- left at its sim pose')
-    reader.close()
+    reader.disconnect()
 
 
 def build_planning_context(picker, sampler):
@@ -243,9 +243,9 @@ def main(tube_source=solve_tubes):
     if len(tube_points) == 0:
         print('tubes: nothing reachable -- nothing to do')
         if cobotta is not None:
-            cobotta.close()
+            cobotta.disconnect()
         if gripper is not None:
-            gripper.close()
+            gripper.disconnect()
         return
     show_tubes(base.scene, tube_points)
 
@@ -383,7 +383,7 @@ def main(tube_source=solve_tubes):
         i = state['i']
         if i >= len(program):
             # the arm stays taken and powered between tubes: a motor cycle
-            # costs a brake release. cobotta.close() releases it on exit.
+            # costs a brake release. cobotta.disconnect() releases it on exit.
             state['mode'] = 'idle'
             print(f"  tube {state['tube'] + 1} reached, arm still live -- "
                   "'space' for the next one")
@@ -399,7 +399,7 @@ def main(tube_source=solve_tubes):
                     if payload == 'open':
                         gripper.open()
                     else:
-                        gripper.close_jaws()
+                        gripper.close()
                     sync_gripper_from_real()
                 except DynamixelError as exc:
                     print(f'execute: gripper {payload} failed ({exc}) -- '
@@ -475,9 +475,9 @@ def run(result):
             base.run()
         finally:
             if cobotta is not None:
-                cobotta.close()
+                cobotta.disconnect()
             if gripper is not None:
-                gripper.close()         # the port only: a held tube stays held
+                gripper.disconnect()   # the port only: a held tube stays held
 
 
 if __name__ == '__main__':

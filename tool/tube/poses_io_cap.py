@@ -6,8 +6,8 @@ Nothing here solves or plans, so it stays cheap to import.
 
 The file holds, in radians:
 
-* ``orientations[name]`` -- the PLACING, per pick orientation
-  (``layout_cap.ORIENTATIONS``): ``drop`` (one config), ``place`` (the
+* ``orientations[name]`` -- the PLACING, per hand orientation
+  (``layout_cap.PLACINGS``): ``drop`` (one config), ``place`` (the
   straight placing path, ``drop`` first) and ``release`` (the short rise
   after letting go, the placed config first);
 * ``fixed`` -- the same for every tube: ``push_top`` (one config), ``push``
@@ -28,7 +28,8 @@ CAP_POSES_JSON = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
     'config', 'poses_cap.json')
 # bumped whenever the shape below changes, so a stale file is refused
-FORMAT_VERSION = 3              # 3: everything after the placing is 'fixed'
+FORMAT_VERSION = 4              # 4: the placings by the hand's orientation
+                                # (from above by the cap; 3: by pick side)
 
 _ORIENTATION_KEYS = ('drop', 'place', 'release')
 _FIXED_KEYS = ('push_top', 'push', 'pop', 'press', 'repick_top', 'repick',

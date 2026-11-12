@@ -7,7 +7,7 @@ sim pose; ``pick_cap_store`` re-checks the paths against the real sampler
 pose before it runs them.
 
 Re-run it after editing ``layout_cap`` (the executor refuses a file solved
-from different values) or after regenerating ``poses_pick.json``.
+from different values).
 
     py -3.12 coripps/tool/tube/precompute_poses_cap.py
 """
@@ -19,7 +19,6 @@ import numpy as np
 
 import coripps.picker_motion as pkm
 import coripps.tool.tube.layout_pick as layout
-import coripps.tool.tube.poses_io_pick as ppio
 import coripps.tool.pose_sequence as pseq
 import coripps.tool.tube.layout_cap as cap
 import coripps.tool.tube.poses_io_cap as cpio
@@ -66,29 +65,14 @@ def solve_descent(picker, pln_ctx, start_qs, start_pos, rotmat, dist, what):
                       np.array([0.0, 0.0, -dist], dtype=np.float32), what)
 
 
-def solve_release(picker, pln_ctx, placed_qs, placed_pos, rotmat):
-    """Slide :data:`layout_cap.RELEASE_SHIFT` along the TCP's own +x, then
-    rise :data:`layout_cap.RELEASE_RISE` -- one path, ``placed_qs``
-    first. None when either leg fails."""
-    shift = np.asarray(rotmat, dtype=np.float32)[:, 0] * cap.RELEASE_SHIFT
-    slide = solve_line(picker, pln_ctx, placed_qs, placed_pos, rotmat, shift,
-                       'sliding out after the release')
-    rise = None if slide is None else solve_descent(
-        picker, pln_ctx, slide[-1], placed_pos + shift, rotmat,
-        -cap.RELEASE_RISE, 'rising after the release')
-    if rise is None:
-        return None
-    return np.concatenate([slide, rise[1:]])
-
-
-def reference_lift(name):
-    """The lift pose of the first precomputed tube picked in orientation
-    ``name`` -- what its drop IK is chosen near. None when no tube is."""
-    _, paths, rotmats, meta = ppio.load_checked(pick_z=layout.PICK_Z)
-    for path, rotmat in zip(paths, rotmats):
-        if cap.orientation_of(rotmat) == name:
-            return path[meta['marks'][3]]
-    return None
+def least_j6(picker, pln_ctx, pos, rotmat):
+    """Of the valid IK solutions at ``(pos, rotmat)``, the one with the
+    least J6 -- what a drop IK is chosen near. None when there is none."""
+    sols = [q for q in (picker.ik(tgt_pos=pos, tgt_rotmat=rotmat,
+                                  tcp=picker.gripper.tcp('grasp_center'),
+                                  max_solutions=8) or [])
+            if pln_ctx.is_state_valid(pln_ctx.enforce_bounds(q))]
+    return min(sols, key=lambda q: abs(float(q[5]))) if sols else None
 
 
 def precompute(path=cpio.CAP_POSES_JSON):
@@ -97,37 +81,31 @@ def precompute(path=cpio.CAP_POSES_JSON):
     pln_ctx, _ = pkm.build_planning_context(picker, sampler)
 
     orientations = {}
-    for name, (rotmat, drop_pos) in cap.ORIENTATIONS.items():
-        lift = reference_lift(name)
-        if lift is None:
-            print(f'{name}: no precomputed tube is picked this way -- '
-                  'skipped')
-            continue
-        print(f'{name}: drop at {np.round(drop_pos * 1000, 2)} mm')
-        drop = solve_pose(picker, pln_ctx, drop_pos, rotmat, lift,
-                          'drop point')
+    for name, (rotmat, drop_pos) in cap.PLACINGS.items():
+        print(f'{name}: drop at {np.round(drop_pos * 1000, 2)} mm, TCP x '
+              f'{np.round(np.asarray(rotmat)[:, 0], 3)}')
+        near = least_j6(picker, pln_ctx, drop_pos, rotmat)
+        drop = None if near is None else solve_pose(
+            picker, pln_ctx, drop_pos, rotmat, near, 'drop point')
         place = None if drop is None else solve_descent(
             picker, pln_ctx, drop, drop_pos, rotmat, cap.PLACE_DESCEND,
             'placing')
         placed_pos = drop_pos - np.array([0.0, 0.0, cap.PLACE_DESCEND],
                                           dtype=np.float32)
-        release = None if place is None else solve_release(
-            picker, pln_ctx, place[-1], placed_pos, rotmat)
-        shift_dir = np.asarray(rotmat, dtype=np.float32)[:, 0]
-        print(f'  release: slide {cap.RELEASE_SHIFT * 1000:.0f} mm along TCP '
-              f'+x = world {np.round(shift_dir, 3)}, then rise '
-              f'{cap.RELEASE_RISE * 1000:.0f} mm')
+        release = None if place is None else solve_descent(
+            picker, pln_ctx, place[-1], placed_pos, rotmat,
+            -cap.RELEASE_RISE, 'rising after the release')
         if release is None:
             return False
         orientations[name] = {'drop': drop, 'place': place,
                               'release': release}
-    if not orientations:
-        print('no orientation could be solved')
+    if len(orientations) < len(cap.PLACINGS):
+        print('not every placing could be solved')
         return False
 
     # the fixed poses: the same for every tube, chained so each IK is chosen
     # near the pose the arm comes from
-    near = (orientations['spun']['drop'] if 'spun' in orientations
+    near = (orientations['towards']['drop'] if 'towards' in orientations
             else next(iter(orientations.values()))['drop'])
     print(f'fixed: push at {np.round(cap.PUSH_POS * 1000, 2)} mm, pop at '
           f'{np.round(cap.POP_POS * 1000, 2)} mm, re-pick at '

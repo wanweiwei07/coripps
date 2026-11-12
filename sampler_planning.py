@@ -181,7 +181,7 @@ def main():
 
     if not replan():
         if cobotta is not None:
-            cobotta.close()
+            cobotta.disconnect()
         return
     print("preview: looping the plan -- 'g' runs it, 'space' replans")
 
@@ -220,7 +220,8 @@ def main():
         if i >= len(path):
             # the arm stays taken and powered: a motor cycle costs a brake
             # release, and 'space'/'g' is meant to be pressed over and over.
-            # cobotta.close() in __main__ releases it when the window closes.
+            # cobotta.disconnect() in __main__ releases it when the window
+            # closes.
             state['mode'] = 'done'
             print("execute: done, arm still live -- 'space' plans the next "
                   "move")
@@ -277,4 +278,4 @@ if __name__ == '__main__':
             base.run()
         finally:
             if cobotta is not None:
-                cobotta.close()
+                cobotta.disconnect()

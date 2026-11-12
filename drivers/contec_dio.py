@@ -15,6 +15,10 @@ one on always turns the other off first, and both are never ON together.
 
 Outputs are sink-type open collector with CONTEC negative logic: writing 1
 switches the transistor on and pulls OUTxx to N-COM.
+
+Inputs (opto-isolated, :meth:`ContecDIO.input`) read 1 while current flows
+through INxx: a PNP (source) output, e.g. the vacuum pressure sensor's,
+with the input group's COM on the external supply's 0 V.
 """
 
 import ctypes
@@ -40,9 +44,12 @@ class ContecDIO:
         self._dll.DioOutBit.argtypes = [ctypes.c_short, ctypes.c_short, ctypes.c_ubyte]
         self._dll.DioEchoBackBit.argtypes = [ctypes.c_short, ctypes.c_short,
                                              ctypes.POINTER(ctypes.c_ubyte)]
+        self._dll.DioInpBit.argtypes = [ctypes.c_short, ctypes.c_short,
+                                        ctypes.POINTER(ctypes.c_ubyte)]
         self._dll.DioGetErrorString.argtypes = [ctypes.c_long, ctypes.c_char_p]
         for fn in (self._dll.DioInit, self._dll.DioExit, self._dll.DioOutBit,
-                   self._dll.DioEchoBackBit, self._dll.DioGetErrorString):
+                   self._dll.DioEchoBackBit, self._dll.DioInpBit,
+                   self._dll.DioGetErrorString):
             fn.restype = ctypes.c_long
         self._id = None
         dev_id = ctypes.c_short()
@@ -65,6 +72,13 @@ class ContecDIO:
         data = ctypes.c_ubyte()
         self._check(self._dll.DioEchoBackBit(self._id, bit, ctypes.byref(data)),
                     'DioEchoBackBit(%d)' % bit)
+        return bool(data.value)
+
+    def input(self, bit):
+        """Input bit ``bit`` (INxx) now: True while its line conducts."""
+        data = ctypes.c_ubyte()
+        self._check(self._dll.DioInpBit(self._id, bit, ctypes.byref(data)),
+                    'DioInpBit(%d)' % bit)
         return bool(data.value)
 
     def vacuum_generator(self, mode):
