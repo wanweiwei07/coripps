@@ -38,12 +38,13 @@ import one.viewer.world as ovw
 import one.collider.mj_collider as ocm
 import one.motion.core.planning_context as omppc
 import one.motion.probabilistic.rrt as ompr
+import one.motion.probabilistic.post_processor as omppp
 from one.drivers.cobotta import BCapError, Cobotta, CobottaMotion
 
 import coripps.tool.tube.layout_pick as layout
 import coripps.tool.pose_sequence as pseq
 import coripps.tool.tube.poses_io_pick as ppio
-from coripps.robots.mobisys import mobisys
+from coripps.robots.mobisys import mobisys, platform_obstacles
 from coripps.end_effectors.xh430_gripper import OPEN_TRAVEL
 from coripps.end_effectors.xh430_gripper.exec import (XH430GripperExec,
                                                       DynamixelError)
@@ -57,7 +58,6 @@ _EXEC_SPEED = 100.0                      # external speed/accel/decel, percent
 _CD_STEP_SIZE = np.pi / 180             # edge collision-check resolution
 _EXTEND_STEP_SIZE = np.pi / 36          # RRT extension step
 _MAX_ITERS = 3000
-_SHORTCUT_ITERS = 200
 _PREVIEW_STEP = np.pi / 60              # preview animation resolution
 _PREVIEW_INTERVAL = 0.03
 _START_TOLERANCE = np.deg2rad(2.0)      # real-vs-planned start mismatch guard
@@ -134,6 +134,23 @@ def build_planning_context(picker, sampler):
                                  cd_step_size=_CD_STEP_SIZE), ground
 
 
+def build_transit_context(picker, sampler):
+    """``build_planning_context`` for the picker's moves between places:
+    the ground raised over the tubes in the rack and the capper as boxes
+    (``mobisys.platform_obstacles``) -- the straight moves into the rack or
+    the capper are checked in ``build_planning_context``'s instead. The
+    sampler's pose is frozen in here too: ``collider.refresh()`` after it
+    moved."""
+    collider = ocm.MJCollider()
+    collider.append(picker)
+    collider.append(sampler)
+    for obstacle in platform_obstacles():
+        collider.append(obstacle)
+    collider.actors = [picker]
+    collider.compile()
+    return omppc.PlanningContext(collider=collider, cd_step_size=_CD_STEP_SIZE)
+
+
 def solve_tubes(picker):
     """Every reachable tube on the grid, with its straight-line joint path."""
     points = layout.pick_points_xy(z=_TUBE_Z)
@@ -157,7 +174,8 @@ def show_tubes(scene, points):
 
 
 def plan_transfer(pln_ctx, start, goal):
-    """RRT-Connect plus shortcutting. None when it fails."""
+    """RRT-Connect, its detours taken out (``PathPostProcessor.tighten``).
+    None when it fails."""
     planner = ompr.RRTConnectPlanner(pln_ctx=pln_ctx,
                                      extend_step_size=_EXTEND_STEP_SIZE)
     t0 = time.time()
@@ -166,7 +184,9 @@ def plan_transfer(pln_ctx, start, goal):
     if not path:
         print(f'  transfer: no path after {elapsed:.3f}s')
         return None
-    path = ompr.shortcut_path(path, pln_ctx, n_iter=_SHORTCUT_ITERS)
+    # the detours RRT leaves taken out, as khi_v2's transits: shortcuts on
+    # the path densified (cuts mid-edge), then one joint at a time
+    path = omppp.PathPostProcessor(pln_ctx).tighten(path)
     print(f'  transfer: planned, {len(path)} waypoints in {elapsed:.3f}s')
     return path
 
@@ -226,8 +246,7 @@ def main(tube_source=solve_tubes):
     """Run the interactive tube tour.
 
     ``tube_source(picker)`` supplies ``(points, paths, marks)``; the default
-    solves the grid here, ``picker_execute_picks`` passes a loader for the
-    precomputed ``config/poses_pick.json`` instead.
+    solves the grid here.
     """
     base, mobisys_base, picker, sampler = build_scene()
     freeze_sampler(sampler)
@@ -456,8 +475,7 @@ def main(tube_source=solve_tubes):
 
 def run(result):
     """Publish what ``main`` returned to ``builtins`` and enter the viewer
-    loop, always releasing the controller on the way out. Shared with
-    ``picker_execute_picks``."""
+    loop, always releasing the controller on the way out."""
     import builtins
 
     if result is not None:

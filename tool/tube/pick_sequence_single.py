@@ -58,7 +58,8 @@ import coripps.tool.tube.layout_cap as cap
 import coripps.tool.tube.poses_io_pick as ppio
 import coripps.tool.tube.tcp_moves as otm
 import coripps.vision.picker_rgb.inrack_cap_orientation as cor
-from coripps.robots.mobisys import mobisys
+from coripps.robots.mobisys import (mobisys, PLATFORM_PLANE_Z,
+                                    CAPPER_BOXES)
 from coripps.end_effectors.xh430_gripper.exec import (XH430GripperExec,
                                                       DynamixelError)
 
@@ -76,18 +77,32 @@ _GRIPPED_MM = 15.0
 _ARRIVAL_TOLERANCE = np.deg2rad(1.0)
 
 
-class MinTcpHeight(omcc.Constraint):
-    """A planning constraint: ``tcp`` (of ``robot``) at or over ``min_z``
-    (world)."""
+class HeldTubeClear(omcc.Constraint):
+    """A planning constraint for a move holding a tube: the tube --
+    ``layout_cap.TUBE_BELOW_GC`` long under ``tcp`` along its z,
+    ``layout_cap.TUBE_RADIUS`` round -- over the rack's plane and out of the
+    capper's boxes (``mobisys.PLATFORM_PLANE_Z`` / ``CAPPER_BOXES``)."""
 
-    def __init__(self, robot, tcp, min_z):
-        self.robot, self.tcp, self.min_z = robot, tcp, float(min_z)
+    def __init__(self, robot, tcp):
+        self.robot, self.tcp = robot, tcp
+        r = cap.TUBE_RADIUS
+        # points along its axis, closer than its radius
+        self._along = np.linspace(0.0, cap.TUBE_BELOW_GC,
+                                  int(np.ceil(cap.TUBE_BELOW_GC / r)) + 1)
+        self._boxes = [(np.asarray(lo) - r, np.asarray(hi) + r)
+                       for lo, hi in CAPPER_BOXES]
 
     def is_valid(self, q):
         self.robot.fk(qs=q)
-        if float(self.tcp.tf[2, 3]) < self.min_z:
-            self.last_fail = f'tcp under {self.min_z * 1000:.0f} mm'
+        tf = self.tcp.tf
+        pts = tf[:3, 3] + np.outer(self._along, tf[:3, 2])
+        if pts[:, 2].min() < PLATFORM_PLANE_Z:
+            self.last_fail = 'the tube under the rack plane'
             return False
+        for lo, hi in self._boxes:
+            if np.any(np.all((pts >= lo) & (pts <= hi), axis=1)):
+                self.last_fail = 'the tube in the capper'
+                return False
         self.last_fail = None
         return True
 
@@ -108,13 +123,20 @@ class PickSession:
         _, self.picker, sampler = mobisys()
         pkm.freeze_sampler(sampler)
         self.pln_ctx, _ = pkm.build_planning_context(self.picker, sampler)
+        # the moves between places: the platform's obstacles too; holding
+        # a tube, the tube as well (by held)
+        transit = pkm.build_transit_context(self.picker, sampler)
+        self._transit = {False: transit, True: omppc.PlanningContext(
+            collider=transit.collider, cd_step_size=transit.cd_step_size,
+            constraints=(HeldTubeClear(self.picker,
+                                       self.picker.gripper.tcp(
+                                           'grasp_center')),))}
         self.grip_current = grip_current
         self.points, self.look_qs_all, _ = ppio.load_checked(
             ndof=self.picker.ndof, layout=layout)
         cor.template()                  # none: stop before anything moves
         self.seg = cor.segmenter()
         self.moves = otm.TcpMoves(self)  # straight lines, turns on the spot
-        self._height_ctx = {}           # min_z -> its planning context
         self.grip = None                # step 2's plan
         self.quit = False               # set when 'q' ended a run
         if tube is not None:
@@ -226,14 +248,14 @@ class PickSession:
 
     # ---- step verbs: each returns True to go on, False to stop -------------
     def transfer_to(self, name, goal, speed=None, held=False):
-        """From wherever the arm is to ``goal``, nothing under
-        ``layout_cap.TRAVEL_MIN_Z`` on the way -- ``held`` (a tube in the
-        gripper): grasp_center over HELD_TRAVEL_MIN_Z, the tube's bottom over
-        TRAVEL_MIN_Z: straight up to it first when the arm is below, across
-        by RRT-Connect (``one``) with that height one of its validity
-        constraints (the straight joint line first, when it is free),
-        straight down to ``goal`` last when it is below.
-        ``speed`` (percent) overrides the run speed for these moves only."""
+        """From wherever the arm is to ``goal``, as ``layout_cap`` moves
+        between poses: straight up until clear of the platform's obstacles
+        (``picker_motion.build_transit_context``; ``held``: a tube in the
+        gripper, the tube too), across -- the straight joint line when it
+        is free, else from both ends raised higher (``lift_for_line``),
+        else RRT-Connect (``one``), all checked against them -- and
+        straight down to ``goal`` the same way. ``speed`` (percent)
+        overrides the run speed for these moves only."""
         start = self.real_qs()
         goal = np.asarray(goal, dtype=np.float32)
         if (np.abs(start - goal).max() < _START_TOLERANCE
@@ -244,12 +266,10 @@ class PickSession:
         if not self.pln_ctx.is_state_valid(start):
             print('  the current pose is in collision -- cannot plan from it')
             return False
-        min_z = cap.HELD_TRAVEL_MIN_Z if held else cap.TRAVEL_MIN_Z
-        plan = self.plan_transfer(start, np.asarray(goal, dtype=np.float32),
-                                  min_z)
+        plan = self.plan_transfer(start, goal, held)
         if plan is None:
-            print(f'  {name}: no path from here with grasp_center at or over '
-                  f'{min_z * 1000:.0f} mm -- stopping')
+            print(f'  {name}: no path from here clear of the platform -- '
+                  'stopping')
             return False
         # one continuous path: played part by part, the arm stops at the end
         # of each (a jerk, worst where a part is a few mm or a fraction of a
@@ -265,69 +285,65 @@ class PickSession:
         return self.play(f"{name} ({' + '.join(names)})", waypoints,
                          speed=speed)
 
-    def plan_transfer(self, start, goal, min_z=cap.TRAVEL_MIN_Z):
+    def plan_transfer(self, start, goal, held=False):
         """``[(part, waypoints), ...]`` from joints ``start`` to ``goal``:
-        'up' / 'across' / 'down' as :meth:`transfer_to` describes, nothing
-        under ``min_z``; None when it cannot be."""
-        m = self.moves
-        s_pos, _ = m.tcp_pose(start)
-        g_pos, g_rot = m.tcp_pose(goal)
-        parts, a, b, down = [], start, goal, None
-        if s_pos[2] < min_z:
-            up = m.line_path(start, [0, 0, min_z - s_pos[2]])
-            if up is None:
-                # no straight line up (e.g. the wrist near its singularity):
-                # plan to the same pose at min_z, collisions the only check
-                _, s_rot = m.tcp_pose(start)
-                sols = [q for q in self.picker.ik(
-                            np.array([s_pos[0], s_pos[1], min_z]), s_rot,
-                            tcp=m.tcp, ref_qs=np.array(start))
-                        if self.pln_ctx.is_state_valid(q)]
-                if not sols:
-                    return None
-                print('  up: no straight line -- planning it instead')
-                top = min(sols, key=lambda q: np.abs(q - start).max()).astype(
-                    np.float32)
-                up = pkm.build_transfer(self.pln_ctx, start, top,
-                                        force_plan=False)
-            if up is None:
-                return None
-            parts.append(('up', up))
-            a = up[-1]
-        if g_pos[2] < min_z:
-            sols = [q for q in self.picker.ik(
-                        np.array([g_pos[0], g_pos[1], min_z]), g_rot,
-                        tcp=m.tcp, ref_qs=np.array(goal))
-                    if self.pln_ctx.is_state_valid(q)]
-            if not sols:
-                return None
-            b = min(sols, key=lambda q: np.abs(q - goal).max()).astype(
-                np.float32)
-            down = m.line_path(b, [0, 0, g_pos[2] - min_z])
-            if down is None:
-                return None
-        # the straight joint line when it is free (the height included),
-        # RRT-Connect only when it is not
-        across = pkm.build_transfer(self.height_ctx(min_z), a, b,
-                                    force_plan=False)
+        'up' / 'across' / 'down' as :meth:`transfer_to` describes (an 'up'
+        or 'down' only where that end is not clear already); None when it
+        cannot be. The transit model is rebuilt first: the other arm where
+        it is now."""
+        ctx = self._transit[held]
+        ctx.collider.refresh()
+        for c in self._transit.values():
+            c.clear_cache()
+
+        def rise(qs):
+            return self.moves.rise_until(qs, ctx.is_state_valid,
+                                         then=cap.TRAVEL_MARGIN,
+                                         most=cap.TRAVEL_RISE_MAX)
+        up = rise(start)
+        down = None if up is None else rise(goal)
+        if down is None:
+            return None
+        up, down, across = self.lift_for_line(ctx, up, down)
+        if across is None:
+            across = pkm.build_transfer(ctx, up[-1], down[-1],
+                                        force_plan=True)
         if across is None:
             return None
+        parts = [('up', up)] if len(up) > 1 else []
         parts.append(('across', across))
-        if down is not None:
-            parts.append(('down', down))
+        if len(down) > 1:
+            parts.append(('down', down[::-1]))
         return parts
 
-    def height_ctx(self, min_z):
-        """The planning context (the same collider) with grasp_center at or
-        over ``min_z`` one of its validity constraints (1 mm slack: the
-        ends of the across are AT it)."""
-        if min_z not in self._height_ctx:
-            self._height_ctx[min_z] = omppc.PlanningContext(
-                collider=self.pln_ctx.collider,
-                cd_step_size=self.pln_ctx.cd_step_size,
-                constraints=(MinTcpHeight(self.picker, self.moves.tcp,
-                                          min_z - 0.001),))
-        return self._height_ctx[min_z]
+    def lift_for_line(self, ctx, up, down):
+        """The straight joint line between the ends of ``up`` and ``down``
+        (each a path from where the arm is / goes, straight up), free in
+        ``ctx``: as they are, else the ends TRAVEL_LIFT_STEP higher at a
+        time, up to TRAVEL_LIFT_MAX -- each as long as it can rise (its
+        rise free in ``ctx`` too), the other on alone when one cannot.
+        ``(up, down, [a, b])`` with the ends found, ``(up, down, None)`` as
+        given when none."""
+        if ctx.is_motion_valid(up[-1], down[-1]):
+            return up, down, [up[-1], down[-1]]
+        ends = [list(up), list(down)]
+        stuck = [False, False]
+        n = int(round(cap.TRAVEL_LIFT_MAX / cap.TRAVEL_LIFT_STEP))
+        for _ in range(n):
+            for i, path in enumerate(ends):
+                if stuck[i]:
+                    continue
+                line = self.moves.line_path(path[-1],
+                                            [0.0, 0.0, cap.TRAVEL_LIFT_STEP])
+                if line is None or not pkm.local_sequence_valid(ctx, line):
+                    stuck[i] = True
+                else:
+                    ends[i] = path + line[1:]
+            if all(stuck):
+                break
+            if ctx.is_motion_valid(ends[0][-1], ends[1][-1]):
+                return ends[0], ends[1], [ends[0][-1], ends[1][-1]]
+        return up, down, None
 
     def follow_path(self, name, path, speed=None):
         """Play a joint path whose first config is where the arm should

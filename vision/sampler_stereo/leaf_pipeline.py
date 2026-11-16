@@ -48,6 +48,7 @@ import numpy as np
 
 import one.geom.loader as ogl
 import one.motion.probabilistic.rrt as ompr
+import one.motion.probabilistic.post_processor as omppp
 import one.utils.math as oum
 
 from coripps.end_effectors.xh430_cutter import xh430_cutter as xc
@@ -112,7 +113,6 @@ LEAF_BOTH_IOU = 0.5
 PLANT_DISP_GUESS = 65.0                 # px
 _EXTEND_STEP_SIZE = np.pi / 36
 _MAX_ITERS = 3000
-_SHORTCUT_ITERS = 200
 
 
 class Eye:
@@ -199,7 +199,8 @@ def plan(pln_ctx, start, goal):
     path = planner.solve(start=start, goal=goal, max_iters=_MAX_ITERS)
     if not path:
         return None
-    return ompr.shortcut_path(path, pln_ctx, n_iter=_SHORTCUT_ITERS)
+    # its detours taken out, as khi_v2's transits
+    return omppp.PathPostProcessor(pln_ctx).tighten(path)
 
 
 # -- the eye's poses -----------------------------------------------------

@@ -25,6 +25,7 @@ import one.viewer.world as ovw
 import one.collider.mj_collider as ocm
 import one.motion.core.planning_context as omppc
 import one.motion.probabilistic.rrt as ompr
+import one.motion.probabilistic.post_processor as omppp
 from one.drivers.cobotta import BCapError, CobottaMotion
 
 from coripps.robots.mobisys import mobisys
@@ -37,7 +38,6 @@ _EXEC_SPEED = 100.0                      # external speed/accel/decel, percent
 _CD_STEP_SIZE = np.pi / 180             # edge collision-check resolution
 _EXTEND_STEP_SIZE = np.pi / 36          # RRT extension step
 _MAX_ITERS = 3000
-_SHORTCUT_ITERS = 200
 _PREVIEW_STEP = np.pi / 60              # preview animation resolution
 _PREVIEW_INTERVAL = 0.03
 _MIN_GOAL_DISTANCE = np.pi / 2          # keep the random goal a real motion away
@@ -104,7 +104,7 @@ def plan(pln_ctx, start, goal):
         print(f'planning: no path after {elapsed:.3f}s '
               f'(RRT is probabilistic -- rerun the script)')
         return None
-    path = ompr.shortcut_path(path, pln_ctx, n_iter=_SHORTCUT_ITERS)
+    path = omppp.PathPostProcessor(pln_ctx).tighten(path)
     print(f'planning: path found in {elapsed:.3f}s, '
           f'{len(path)} waypoints after shortcutting')
     return path

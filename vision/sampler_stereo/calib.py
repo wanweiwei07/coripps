@@ -54,11 +54,11 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 # coripps/config (this file is coripps/vision/<camera>/calib.py)
 CONFIG_DIR = os.path.join(os.path.dirname(os.path.dirname(_HERE)), 'config')
 _ROBOT = 2                      # mobisys(): (base, picker, sampler)
-# the platform (mobisys' base.stl) as boxes for the hand-eye moves: its
+# the platform (mobisys' cart box, tube_rack / capper .stl) as boxes for the hand-eye moves: its
 # mesh is too fine for the collider, and what stands on the table is two
 # low blocks; (x, y, z) min / max in the world, m, ~1 cm margin
 PLATFORM_BOXES = (((-0.25, 0.09, 0.0), (0.31, 0.26, 0.055)),
-                  ((0.09, -0.13, 0.0), (0.31, 0.10, 0.095)))
+                  ((0.09, -0.13, 0.0), (0.31, 0.10, 0.120)))  # capper +25 mm
 # hand-eye views: camera to board centre (m), near the working range
 # (100-300 mm) -- but the cutter's tube reaches ~10 cm past the cameras,
 # so not nearer than where its tip stays ~5 cm off the board, also at

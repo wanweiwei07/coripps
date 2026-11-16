@@ -26,14 +26,24 @@ import coripps.tool.tube.layout_pick as layout
 
 
 # ---- moving between poses ------------------------------------------------
-# on a move from one pose to another, nothing lower than this: the capper's
-# opener, open, reaches up to near it. A move from / to lower goes straight
-# up / down there first / last. Empty, grasp_center; holding a tube, the
-# tube's bottom -- TUBE_BELOW_GC under grasp_center (models/tube.stl: 59 mm
-# long, held by its cap's top)
-TRAVEL_MIN_Z = 0.095
+# a move from one pose to another goes straight up from where the arm is
+# until it is clear of the transit obstacles (mobisys.platform_obstacles: a
+# plane over the rack's tubes, the capper as boxes) by TRAVEL_MARGIN more,
+# across (checked against them), and straight down to the goal the same
+# way -- each end only as high as it has to: TRAVEL_RISE_MAX at most
+# (higher only for a straight across, see TRAVEL_LIFT_STEP).
+# Holding a tube, the tube counts too: TUBE_BELOW_GC long under
+# grasp_center along the hand's axis (models/tube.stl: 59 mm, held by its
+# cap's top), TUBE_RADIUS round it
+TRAVEL_MARGIN = 0.005
+TRAVEL_RISE_MAX = 0.150
+# when the straight joint line between the two ends is not free, both ends
+# go up by TRAVEL_LIFT_STEP more and the line is tried again, up to
+# TRAVEL_LIFT_MAX more; RRT-Connect between the low ends only when none is
+TRAVEL_LIFT_STEP = 0.020
+TRAVEL_LIFT_MAX = 0.100
 TUBE_BELOW_GC = 0.0592
-HELD_TRAVEL_MIN_Z = TRAVEL_MIN_Z + TUBE_BELOW_GC
+TUBE_RADIUS = 0.013
 
 # ---- placing ----------------------------------------------------------------
 # the store's hole; the drop point above it. The tube hangs from its cap now,

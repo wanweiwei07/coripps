@@ -73,6 +73,30 @@ class TcpMoves:
                 return None
         return path
 
+    def rise_until(self, start, ok, then=0.0, most=0.150):
+        """grasp_center from joints ``start`` straight up, the orientation
+        kept, LINE_STEP at a time, until ``ok(qs)`` -- and ``then`` (m) on
+        from there, ``ok`` there too: the path, ``[start]`` when ``ok(start)``;
+        None when not within ``most`` (m) or the line stops first."""
+        path = [np.array(start, dtype=np.float32)]    # a copy: see _extend
+        if ok(path[0]):
+            return path
+        pos, rotmat = self.tcp_pose(start)
+        clear = None                    # how high ok first held
+        for k in range(1, int(np.ceil(most / LINE_STEP)) + 1):
+            rise = k * LINE_STEP
+            if not self._extend(path, pos + np.array([0.0, 0.0, rise]),
+                                rotmat):
+                print(f'  the rise stops at {(rise - LINE_STEP) * 1000:.0f} '
+                      'mm')
+                return None
+            if ok(path[-1]):
+                if clear is None:
+                    clear = rise
+                if rise >= clear + then - 1e-9:
+                    return path
+        return None
+
     def arc_path(self, start, deg, axis_xy=None, partial=False):
         """grasp_center (pose and place) from joints ``start`` turned by
         ``deg`` about the vertical world axis through ``axis_xy`` (default:

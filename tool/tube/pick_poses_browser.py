@@ -1,14 +1,16 @@
-"""Look at what ``precompute_poses_pick`` produced, one pose at a time.
+"""Look at the tubes ``precompute_poses_pick`` kept, one at a time.
 
 Reads ``config/poses_pick.json`` -- it does NOT re-solve, so it opens in a
-second instead of a minute, and what you see is exactly the data the execution
-scripts will replay, not a fresh IK solution that may have picked a different
-branch.
+second instead of a minute, and what you see is exactly the data the
+execution scripts use.
 
-The whole grid is drawn: a tube at every candidate, a green dot where the pick
-solved and a red one where it did not. ``space`` steps through the four poses
-of the selected pick and then on to the next pick, driving the arm to the
-stored joint angles and parking a yellow cursor on the TCP position.
+The whole grid is drawn: a tube at every candidate, a green dot where the
+pick solved and a red one where it did not. ``space`` steps to the next
+kept tube, driving the arm to its stored ``pre_pick`` (the hand looking at
+the cap from above) and parking a yellow cursor on that TCP position. The
+printed ``tube k`` is the index ``main.py --tube k`` / ``single_routine.py
+--tube k`` take. (The grip itself depends on the cap's long tab, so it is
+solved at run time and not in the file.)
 
     py -3.12 coripps/tool/tube/pick_poses_browser.py
 """
@@ -33,12 +35,8 @@ _TUBE_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.pat
 
 
 def browse(path=ppio.PICK_POSES_JSON):
-    if not os.path.exists(path):
-        raise FileNotFoundError(
-            f'{path} is missing -- run tool/precompute_poses_pick.py first')
-    valid_points, paths, rotmats, meta = ppio.load(path)
-    sequences = ppio.key_poses(paths, meta)     # the four key poses
-    print(f"{len(valid_points)} picks from {os.path.basename(path)} "
+    points, look_qs, meta = ppio.load_checked(path, layout=layout)
+    print(f"{len(points)} tubes from {os.path.basename(path)} "
           f"(grid {meta.get('grid_total')}, "
           f"grasp height {meta.get('pick_z')})")
 
@@ -55,7 +53,7 @@ def browse(path=ppio.PICK_POSES_JSON):
     # the file holds only what SOLVED, so the failures are the grid minus it
     grid = layout.pick_points_xy(z=meta.get('pick_z', layout.PICK_Z))
     solved = np.asarray([
-        np.any(np.all(np.isclose(valid_points, point), axis=1))
+        np.any(np.all(np.isclose(points, point), axis=1))
         for point in grid], dtype=bool)
 
     tube_template = osso.SceneObject.from_file(
@@ -71,56 +69,41 @@ def browse(path=ppio.PICK_POSES_JSON):
                      rgb=ouc.BasicColor.GREEN if ok else ouc.BasicColor.RED
                      ).attach_to(base.scene)
 
-    cursor = ossop.sphere(
-        pos=valid_points[0] if len(valid_points) else (0.0, 0.0, 0.0),
-        radius=0.009, segments=12, rgb=ouc.BasicColor.YELLOW, alpha=1.0)
+    cursor = ossop.sphere(pos=(0.0, 0.0, 0.0), radius=0.009, segments=12,
+                          rgb=ouc.BasicColor.YELLOW, alpha=1.0)
     cursor.attach_to(base.scene)
 
-    state = {'point_idx': 0, 'pose_idx': 0}
+    state = {'tube': 0}
 
     def show_current():
-        if len(valid_points) == 0:
-            return
-        point_idx, pose_idx = state['point_idx'], state['pose_idx']
-        # the orientation this point actually solved with, not a re-guess
-        rotmat = rotmats[point_idx]
-        points = layout.pose_points(valid_points[point_idx], rotmat)
-        tube_handler.fk(qs=sequences[point_idx, pose_idx])
-        cursor.set_pos_rotmat(pos=points[pose_idx])
+        k = state['tube']
+        tube_handler.fk(qs=look_qs[k])
+        tcp = layout.pre_pick_pos(points[k])
+        cursor.set_pos_rotmat(pos=tcp)
         base.scene.dirty = True
-        print(f'pick {point_idx + 1}/{len(valid_points)} '
-              f'pose {pose_idx + 1}/{len(ppio.POSE_NAMES)} '
-              f'{ppio.POSE_NAMES[pose_idx]} '
-              f'from {layout.approach_of(rotmat)} '
-              f'tcp={np.round(points[pose_idx], 4)}')
+        print(f'tube {k} ({k + 1}/{len(points)}) pre_pick '
+              f'tcp={np.round(tcp, 4)}')
 
     def step(dt):
         if not base.input_manager.is_key_pressed_edge(pkey.SPACE):
             return
-        if len(valid_points) == 0:
-            return
-        state['pose_idx'] += 1
-        if state['pose_idx'] >= len(ppio.POSE_NAMES):
-            state['pose_idx'] = 0
-            state['point_idx'] = (state['point_idx'] + 1) % len(valid_points)
+        state['tube'] = (state['tube'] + 1) % len(points)
         show_current()
 
     show_current()
     base.schedule_interval(step, interval=0.03)
     print(f'grid {len(grid)}: {int(solved.sum())} green, '
-          f'{int((~solved).sum())} red -- space steps through the poses')
-    return base, tube_handler, valid_points, sequences, rotmats, state
+          f'{int((~solved).sum())} red -- space steps to the next tube')
+    return base, tube_handler, points, look_qs, state
 
 
 if __name__ == '__main__':
     import builtins
 
-    (base, tube_handler, valid_points, sequences,
-     rotmats, state) = browse()
+    base, tube_handler, points, look_qs, state = browse()
     builtins.base = base
     builtins.tube_handler = tube_handler
-    builtins.valid_points = valid_points
-    builtins.sequences = sequences
-    builtins.rotmats = rotmats
+    builtins.points = points
+    builtins.look_qs = look_qs
     builtins.state = state
     base.run()

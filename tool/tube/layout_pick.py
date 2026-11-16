@@ -66,7 +66,7 @@ LOOK_ROTMAT = TCP_ROTMAT_FROM_NY
 # lens is focused near), the fingertips ~10 mm clear of it
 PICK_LOOK_RISE = 0.015
 # then straight up this far with the tube: out of its hole in the rack (the
-# move on keeps a held tube's bottom high: layout_cap.HELD_TRAVEL_MIN_Z)
+# move on rises until the held tube is clear: layout_cap's transfers)
 LIFT_DIST = 0.065
 # the fingers' opening on the way down to the cap: just wider than the cap
 # (~22 mm across them), to keep clear of the neighbours -- a neighbour's

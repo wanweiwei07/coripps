@@ -21,6 +21,7 @@ import one.scene.scene_object_primitive as ossop
 import one.collider.mj_collider as ocm
 import one.motion.core.planning_context as omppc
 import one.motion.probabilistic.rrt as ompr
+import one.motion.probabilistic.post_processor as omppp
 from one.drivers.cobotta import BCapError, Cobotta, CobottaMotion
 
 from coripps.robots.mobisys import mobisys
@@ -32,7 +33,6 @@ _EXEC_SPEED = 30.0                      # homing transit, so slower than a pick
 _CD_STEP_SIZE = np.pi / 180
 _EXTEND_STEP_SIZE = np.pi / 36
 _MAX_ITERS = 3000
-_SHORTCUT_ITERS = 200
 _ARRIVAL_TOLERANCE = np.deg2rad(0.5)
 # the cutter tcp at (100, -50, 100) mm (base frame), pointing down
 _HOME_QS_DEG = (-6.28, -10.91, 132.23, 0.0, 58.68, -36.28)
@@ -120,7 +120,7 @@ def home():
                 print(f'path: no route home after {elapsed:.3f}s -- '
                       'nothing sent')
                 return False
-            path = ompr.shortcut_path(path, pln_ctx, n_iter=_SHORTCUT_ITERS)
+            path = omppp.PathPostProcessor(pln_ctx).tighten(path)
             print(f'path: planned, {len(path)} waypoints in {elapsed:.3f}s')
 
         cobotta.enable()
