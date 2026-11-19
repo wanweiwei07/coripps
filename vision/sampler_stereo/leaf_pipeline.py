@@ -143,6 +143,7 @@ class Eye:
         color, depth, K, self.rows, self.matched = sd.rgbd(
             *self.pair, self.rect, rows=self.rows)
         self.last_depth = depth
+        self.last_color, self.last_K = color, K     # e.g. for a live view
         self.right_masks = None         # the right's leaves, by _found
         return color, depth, K
 

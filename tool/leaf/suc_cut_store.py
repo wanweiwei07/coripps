@@ -43,12 +43,15 @@ blade, lift it, and put it into the tube in the capper.
        the leaf lost): back up, look again, another leaf; MAX_TRIES in
        all, then given up
 
-Each step waits for 'g' (q / Esc / Ctrl+C stop; in the console or the
-picture's window); ``--c`` runs straight through (q stops before the next
-step). After each step a window shows what it left: the vision steps'
-annotated pictures (the plant's circle; the leaves, C red, J blue, the
-chosen one starred), after a motion the left eye now with the plant's
-circle and the chosen leaf's C -> J where they are. A motion is planned before its 'g'
+Each step waits for 'g' (q / Esc / Ctrl+C stop; in the console, the
+viewer or the picture's window); ``--c`` runs straight through (q stops
+before the next step). The live view (``coripps.monitor``) runs beside:
+the arms where they are, the last look's point cloud, and a picture
+window -- the vision steps' leaves (the chosen green, the candidates
+yellow, the others grey) with a table of every leaf's numbers and why it
+is not taken; after a motion the left eye now with the plant's circle and
+the chosen leaf's C -> J where they are. Closing the viewer stops before
+the next step. A motion is planned before its 'g'
 and printed. Whatever ends the run, the ultrasonic is switched off and the
 blade's board closed -- which also stops the vacuum (a held leaf drops).
 The vision steps are ``coripps.vision.sampler_stereo.leaf_pipeline``'s
@@ -75,7 +78,8 @@ import coripps.end_effectors.xh430_cutter.exec as xce
 from coripps.end_effectors.xh430_cutter.exec import XH430CutterExec
 from coripps.tool.home_sampler import _build, _SAMPLER_HOST
 from coripps.robots.mobisys import capper_tube_pos
-from coripps.tool.keys import _quit_pressed, _wait_for_g
+from coripps import monitor
+from coripps.tool.keys import _QUIT_KEYS, _quit_pressed, _wait_for_g
 from coripps.vision.sampler_stereo import leaf_pipeline as lp
 from coripps.vision.sampler_stereo import leaves as lv
 
@@ -135,10 +139,10 @@ STRAIGHT_STEP = lp.DESCENT_STEP
 # run from where it is, when that first stretch is free; further: stopped
 DRIFT_MAX_DEG = 3.0
 # the one look, near: the nozzle's tip this far over the plant's top (the
-# eye ~50 mm further up, behind it: ~70 mm, past the stereo's nearest
+# eye ~50 mm further up, behind it: ~80 mm, past the stereo's nearest
 # ~61 mm -- f 299 px x baseline 26 mm / LEAF_MAX_DISP 128 px) -- it sees the
 # whole plant and its pot from there; no look from afar to agree with
-LOOK_CLEARANCE = 0.020
+LOOK_CLEARANCE = 0.030
 # the chosen leaf looked at again, closer, before the take: the eye this far
 # over the plant's top, beside the cutter (at the approach the nozzle hides
 # the leaf, and 60 mm is past the stereo's disparity range)
@@ -305,8 +309,13 @@ class LeafSession:
     def s_find_plant(self):
         def run():
             time.sleep(lp.SETTLE)
-            self.plant = lp.find_plant(self.eye, self.sampler, self.qs_now(),
+            qs = self.qs_now()
+            self.plant = lp.find_plant(self.eye, self.sampler, qs,
                                        self.tf_flange_cam, self.segmenter)
+            self.publish_look(qs, 'find the plant: ' + (
+                'none' if self.plant is None else
+                f"radius {self.plant['radius'] * 1000:.0f} mm, top z "
+                f"{self.plant['plant_z'] * 1000:.0f} mm"))
             if self.plant is None:
                 raise RuntimeError('find the plant: no plant found')
             print(f"plant: centre "
@@ -338,23 +347,64 @@ class LeafSession:
                 f'{height * 1000:.0f} mm, {len(path)} waypoints)',
                 lambda: self.run(path, FREE_SPEED, 'observe'))
 
+    def leaf_row(self, i, lf, short=False):
+        """One leaf's numbers, one line: C, slope, ovalness, C - J, room,
+        and why it is not taken (``short``: as the live view's table)."""
+        sl = leaf_pitch(lf)
+        cj = np.linalg.norm(lf['C'] - lf['J'])
+        why = []
+        if lf.get('oval', 1.0) < lv.MIN_OVAL:
+            why.append(f'oval<{lv.MIN_OVAL:.2f}')
+        if cj < lv.MIN_CJ:
+            why.append(f'C-J<{lv.MIN_CJ * 1000:.0f}')
+        if any(np.linalg.norm(lf['C'][:2] - np.asarray(p)[:2])
+               <= lv.SKIP_RADIUS for p in self.tried):
+            why.append('tried')
+        if short:
+            c = lf['C'] * 1000
+            return (f"{i}: C ({c[0]:.0f},{c[1]:.0f},{c[2]:.0f}) slope "
+                    f"{'?' if sl is None else f'{np.degrees(sl):+.0f}'} oval "
+                    f"{lf.get('oval', float('nan')):.2f} C-J {cj * 1000:.1f} "
+                    f"room {min(lf['room']):.1f}"
+                    f"{'  NOT: ' + ' '.join(why) if why else ''}")
+        return (f"leaf {i}: C {np.round(lf['C'] * 1000, 1)} mm, slope "
+                f"{'?' if sl is None else f'{np.degrees(sl):+.0f}'} deg, "
+                f"oval {lf.get('oval', float('nan')):.2f}, C-J "
+                f"{cj * 1000:.1f} mm, room {min(lf['room']):.1f} mm"
+                f"{' -- not taken: ' + ', '.join(why) if why else ''}")
+
+    def publish_look(self, qs, title, leaves=(), chosen=None):
+        """The last frame to the live view (``coripps.monitor``): the
+        picture with ``leaves`` (``chosen`` starred) and their numbers, and
+        its point cloud. Never fails the step."""
+        try:
+            eye = self.eye
+            color, depth, K = eye.last_color, eye.last_depth, eye.last_K
+            cam_tf = lp.tf_w_cam(self.sampler, qs, self.tf_flange_cam)
+            img = monitor.look_image(
+                lv.normalize(color), leaves, chosen,
+                [self.leaf_row(i, lf, short=True)
+                 for i, lf in enumerate(leaves)]
+                + ['mm, deg; C-J >= %.0f, oval >= %.2f to be taken'
+                   % (lv.MIN_CJ * 1000, lv.MIN_OVAL)], title,
+                takeable=lambda lf: lv.takeable(lf, self.tried))
+            monitor.publish(img, monitor.cloud_world(color, depth, K, cam_tf))
+        except Exception as exc:        # the view only -- go on
+            print(f'(live view: {exc})')
+
     def s_look(self):
         def run():
             time.sleep(lp.SETTLE)
-            found = lp.look(self.eye, self.sampler, self.qs_now(),
+            qs = self.qs_now()
+            found = lp.look(self.eye, self.sampler, qs,
                             self.tf_flange_cam, self.segmenter, self.plant,
                             skip=self.tried)
             if found is None:
+                self.publish_look(qs, 'look: no leaves found')
                 raise RuntimeError('look: no leaves found')
             leaves, chosen = found
             for i, lf in enumerate(leaves):
-                sl = leaf_pitch(lf)
-                print(f"  leaf {i}: C {np.round(lf['C'] * 1000, 1)} mm, slope "
-                      f"{'?' if sl is None else f'{np.degrees(sl):+.0f}'} deg, "
-                      f"oval {lf['oval']:.2f}, C-J "
-                      f"{np.linalg.norm(lf['C'] - lf['J']) * 1000:.1f} mm, room "
-                      f"{min(lf['room']):.1f} mm"
-                      f"{'' if lv.takeable(lf, self.tried) else ' -- not taken'}")
+                print(f'  {self.leaf_row(i, lf)}')
             # a leaf asked for (``target``, world): the one nearest it,
             # whatever the rules -- unless it was tried already
             if self.target is not None and all(
@@ -366,6 +416,9 @@ class LeafSession:
                 print(f'look: the leaf asked for: leaf {chosen}, '
                       f"{np.linalg.norm(leaves[chosen]['C'][:2] - self.target[:2]) * 1000:.1f}"
                       ' mm from it (the rules not applied)')
+            self.publish_look(qs, f'look: {len(leaves)} leaves, chosen '
+                              f"{'none' if chosen is None else chosen}",
+                              leaves, chosen)
             if chosen is None:
                 raise RuntimeError(f'look: no leaf to take -- C at least '
                                    f'{lv.MIN_CJ * 1000:.0f} mm from J, not '
@@ -438,9 +491,14 @@ class LeafSession:
     def s_close_look(self):
         def run():
             time.sleep(lp.SETTLE)
-            new = lp.relook(self.eye, self.sampler, self.qs_now(),
+            qs = self.qs_now()
+            new = lp.relook(self.eye, self.sampler, qs,
                             self.tf_flange_cam, self.segmenter, self.leaf,
                             prefix='close_')
+            self.publish_look(qs, 'close look: ' + (
+                'the leaf not found again' if new is None else
+                'the chosen leaf again'), [] if new is None else [new],
+                None if new is None else 0)
             if new is None:
                 raise TakeFailed('close look: the leaf not found again')
             self.leaf = new
@@ -896,12 +954,21 @@ class LeafSession:
                         self.s_blow, self.s_out_of_tube]
 
 
-def main(continuous=False):
-    try:
-        session = LeafSession()
-    except Exception as exc:
-        print(f'cannot start: {exc}')
-        return False
+def take(session, continuous=False, idle=None):
+    """The steps, one after another (a failed take: another leaf, MAX_TRIES
+    in all); each after a 'g' -- or straight through, ``continuous`` --
+    (``idle``: keys from the live view's windows, as ``_wait_for_g``'s).
+    True when the leaf is in the tube."""
+    def stopped():
+        if _quit_pressed():
+            return True
+        while idle is not None:
+            typed = idle()
+            if typed is None:
+                return False
+            if typed in _QUIT_KEYS:
+                return True
+
     try:
         makers, k, tries, given_up = session.steps(), 0, 1, False
         while k < len(makers):
@@ -914,10 +981,10 @@ def main(continuous=False):
                          f'step {k}/{len(makers)}: {what}')
                 if continuous:
                     print(f'\n{title}')
-                    if _quit_pressed():
+                    if stopped():
                         print('stopped')
                         return False
-                elif not _wait_for_g(title, idle=_window_key):
+                elif not _wait_for_g(title, idle=idle):
                     print('stopped')
                     return False
                 run()
@@ -934,11 +1001,13 @@ def main(continuous=False):
                       f'(try {tries}/{MAX_TRIES})')
                 makers, k = session.steps(retake=True), 0
                 continue
-            try:
-                cv2.imshow(WINDOW, session.view(make, title))
-                cv2.waitKey(1)
-            except Exception as exc:        # the picture only -- go on
-                print(f'(no picture: {exc})')
+            # the picture: the vision steps' (leaves, numbers, cloud) went to
+            # the live view as they looked; after the others, the eye now
+            if make.__name__ not in LeafSession._SAVED:
+                try:
+                    monitor.publish(session.view(make, title))
+                except Exception as exc:    # the picture only -- go on
+                    print(f'(no picture: {exc})')
         if given_up:
             print(f'\ngiven up: no leaf after {MAX_TRIES} tries')
             return False
@@ -947,25 +1016,40 @@ def main(continuous=False):
     except (RuntimeError, OSError, BCapError) as exc:
         print(f'stopped: {exc}')
         return False
+
+
+def main(continuous=False):
+    """:func:`take` in a thread of its own, the live view
+    (``coripps.monitor``: the arms, the last look's cloud and picture with
+    every leaf's numbers) on this one; closing it stops before the next
+    step."""
+    import threading
+    import one.viewer.world as ovw
+    from coripps import single_routine as sr
+
+    try:
+        session = LeafSession()
+    except Exception as exc:
+        print(f'cannot start: {exc}')
+        return False
+    try:
+        base = ovw.World(cam_pos=sr.CAM_POS, cam_lookat_pos=sr.CAM_LOOKAT)
+        live = monitor.Live(base, sr._Stage(base), keys=True).start()
+        result = {}
+
+        def work():
+            result['ok'] = take(session, continuous, idle=live.key)
+            print('(close the viewer to end)')
+
+        thread = threading.Thread(target=work, name='steps', daemon=True)
+        thread.start()
+        base.run()
+        live.closed = True                  # 'q' to the steps
+        thread.join()
+        return result.get('ok', False)
     finally:
         session.close()
         cv2.destroyAllWindows()
-
-
-WINDOW = 'suc_cut_store'
-
-
-def _window_key():
-    """A key typed in the picture's window (it kept drawn), or None."""
-    try:
-        shown = cv2.getWindowProperty(WINDOW, cv2.WND_PROP_VISIBLE) >= 1
-    except cv2.error:
-        shown = False
-    if not shown:                       # no window (yet / closed)
-        time.sleep(0.03)
-        return None
-    key = cv2.waitKey(30) & 0xFF
-    return None if key == 0xFF else chr(key)
 
 
 if __name__ == '__main__':

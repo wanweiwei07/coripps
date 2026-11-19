@@ -86,6 +86,7 @@ from coripps.tool.home_picker import HOME_QS_DEG
 from coripps.tool.tube.pick_sequence_single import PickSession
 from coripps.vision.sampler_stereo import depth as sd
 from coripps.vision.sampler_stereo import leaf_pipeline as lp
+from coripps import monitor
 
 
 RETREAT_SPEED = 100.0                       # %, both robots going home
@@ -93,7 +94,6 @@ WAIT_POLL = 0.1                             # s
 RETRY_PERIOD = 0.5                          # s, re-planning while blocked
 PLAY_INTERVAL = 1 / 30.0                    # s, the animation
 HOLD_FRAMES = 30                            # held at the end of the loop
-FOLLOW_INTERVAL = 0.1                       # s, the real arms on screen
 PLAY_STEP = np.deg2rad(1.0)                 # rad per drawn frame
 SIM_TAB_DEG = 0.0                           # the simulation's cap long tab
 SIM_CAP_WIDTH = 0.022                       # the gripper closed on a cap (m)
@@ -671,7 +671,7 @@ class _Stage:
 
 
 def show(phases, ok, real, capper=None, tube_tfs=None, speed=1,
-         growing=None):
+         growing=None, tube_points=None):
     """Loop the simulation; 'g' starts ``real()`` (when ``ok``; ``real``
     None: a simulation only) and the viewer follows the real arms -- and the
     real capper (``capper``, its exec: the angle its last move ended at);
@@ -680,7 +680,9 @@ def show(phases, ok, real, capper=None, tube_tfs=None, speed=1,
     drawn frame (a faster replay). ``phases`` (and ``tube_tfs``) may still
     grow while it runs -- another thread planning more -- the loop takes
     them in as they come; while ``growing()`` is True it waits at the end
-    for them instead of starting over."""
+    for them instead of starting over. With ``real``: the live view too
+    (``coripps.monitor``: the last look's picture, its leaves' numbers and
+    point cloud; ``tube_points``, the rack's tubes, the worked one red)."""
     from pyglet.window import key
     import one.viewer.world as ovw
 
@@ -689,21 +691,12 @@ def show(phases, ok, real, capper=None, tube_tfs=None, speed=1,
     base = ovw.World(cam_pos=CAM_POS, cam_lookat_pos=CAM_LOOKAT)
     stage = _Stage(base, tube_tfs)
     state = {'i': 0, 'running': None}
+    live = None if real is None else monitor.Live(
+        base, stage, capper, tube_points).start(follow=False)
     print("\nviewer: the simulation loops -- " +
           ('closing the window ends it' if real is None else
            ("'g' in the window runs it on the real cell, " if ok else
             'it FAILED, nothing can be run; ') + "'q' / closing stops"))
-
-    def follow():
-        for robot, host in ((stage.picker, _PICKER_HOST),
-                            (stage.sampler, _SAMPLER_HOST)):
-            try:
-                robot.fk(qs=read_qs(host, robot.ndof))
-            except (OSError, BCapError):
-                pass
-        deg = None if capper is None else capper.last_deg
-        if deg is not None:
-            stage.platform.capper.set_dial(deg)
 
     def tick(dt):
         im = base.input_manager
@@ -714,8 +707,7 @@ def show(phases, ok, real, capper=None, tube_tfs=None, speed=1,
         if state['running'] is None:
             if go and ok and real is not None:
                 state['running'] = real()
-                base.schedule_interval(lambda dt: follow(),
-                                       interval=FOLLOW_INTERVAL)
+                live.follow()           # the real arms, the capper
                 return
             if len(phases) != seen['phases']:   # more planned meanwhile
                 seen['phases'] = len(phases)
@@ -829,7 +821,8 @@ def main(tube=pcs.TUBE_INDEX, leaf=None):
                                                       plan, sampler)
             return shared
 
-        shared = show(phases, ok, real, capper)
+        monitor.publish_tubes(tube)
+        shared = show(phases, ok, real, capper, tube_points=picker.points)
         if shared is None:
             return False
         shared.stop.set()               # the window is closed: stop both
