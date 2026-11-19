@@ -124,7 +124,7 @@ TUBE_XY = tuple(capper_tube_pos()[:2] + np.array(STORE_XY_FIX))
 TUBE_TOP_Z = float(capper_tube_pos()[2])
 STORE_CLEARANCE = 0.040         # nozzle over the top before going down
 STORE_DEPTH = 0.0               # nozzle below the top -- 0: at the opening
-BLOW_TIME = 1.0
+BLOW_TIME = 0.1                 # s: a puff -- longer blows the leaf back out
 ROLL_STEP_DEG = 15              # the nozzle's free roll over the tube
 # ---- speeds (%) --------------------------------------------------------------
 FREE_SPEED = 30.0               # search, observe, to the plant / capper --
