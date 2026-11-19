@@ -25,8 +25,8 @@ blade, lift it, and put it into the tube in the capper.
     8   vacuum on, down along the leaf's z SEAL_STEP at a time until the
         pressure sensor reads the nozzle sealed (at most DESCEND_DIST),
         SUCK_WAIT
-    9   tilt: the held leaf up about its J to TILT_TO_DEG (C up) -- off the
-        soil, the blade's sweep onto the petiole
+    9   tilt: the held leaf up to TILT_TO_DEG about the plant's centre
+        (C and J up) -- off the soil and the pot's rim
     10  ultrasonic on, US_SPINUP
     11  the cut: XH430CutterExec.cut -- the blade's last stretch slow, a
         step at a time; the leaf checked after each pass
@@ -102,8 +102,9 @@ VAC_ON_ABOVE = 0.004            # m over the leaf's height: the vacuum on
 # the nozzle's pitch on the way in: the leaf's slope up J -> C (square to
 # it), at most PITCH_MAX_DEG; drooping: 0 (level)
 PITCH_MAX_DEG = 35.0
-TILT_TO_DEG = 15.0              # held, the leaf tilted up about its J to
-                                # this (C up), when less -- before the cut
+TILT_TO_DEG = 15.0              # held, the leaf tilted up about the
+                                # plant's centre to this, when less -- before
+                                # the cut
 TILT_SPEED = 5.0                # %
 US_SPINUP = 0.5                 # ultrasonic on before the blade moves
                                 # the cut itself: XH430CutterExec.cut (its
@@ -679,24 +680,26 @@ class LeafSession:
                 f'{how}', lambda: self.run(path, NEAR_SPEED, 'back up'))
 
     def s_tilt(self):
-        """The held leaf tilted up about its J to TILT_TO_DEG (from the
-        pitch the nozzle came in at; already that steep: nothing): the
-        nozzle swung
-        about the horizontal axis through J across J -> C (J at the
-        nozzle's height -- the leaf is at the nozzle), C going up -- the
-        leaf peeled up off the soil, the blade's sweep (between the nozzle
-        and J) under it and onto the petiole, not into the soil. Planned
-        when its turn comes; not plannable: another leaf."""
+        """The held leaf tilted up to TILT_TO_DEG (from the pitch the
+        nozzle came in at; already that steep: nothing) about the plant's
+        centre: the nozzle swung about the horizontal axis through the
+        plant's centre (at the nozzle's height) across the centre -> nozzle
+        line, the nozzle going up -- C and J both lifted, the leaf and the
+        blade's sweep (between the nozzle and J) off the soil and the pot's
+        rim. Planned when its turn comes; not plannable: another leaf."""
         qs = self.qs_now()
         self.sampler.fk(qs=qs)
         cur = np.array(self.sampler.cutter.tcp('tcp').tf, dtype=np.float64)
-        y = self.leaf['tf'][:3, 1]                  # J -> C, horizontal
-        axis = np.cross([0.0, 0.0, 1.0], y)
-        axis /= np.linalg.norm(axis)
-        pivot = np.array([*self.leaf['J'][:2], cur[2, 3]])
-        # the sign that takes C up
-        # (against y's own height: y is pitched when the nozzle came in so)
-        sign = 1.0 if (oum.rotmat_from_axangle(axis, 0.1) @ y)[2] > y[2] \
+        y = self.leaf['tf'][:3, 1]                  # J -> C (pitched)
+        pivot = np.array([*self.plant['center'][:2], cur[2, 3]])
+        out = cur[:3, 3] - pivot                    # centre -> nozzle
+        out[2] = 0.0
+        if np.linalg.norm(out) < 0.005:             # over the centre: J -> C
+            out = np.array([y[0], y[1], 0.0])
+        out /= np.linalg.norm(out)
+        axis = np.cross([0.0, 0.0, 1.0], out)
+        # the sign that takes the nozzle (and C) up
+        sign = 1.0 if (oum.rotmat_from_axangle(axis, 0.1) @ out)[2] > 0 \
             else -1.0
         now = np.degrees(np.arcsin(np.clip(y[2] / np.linalg.norm(y), -1, 1)))
         tilt = TILT_TO_DEG - now
@@ -719,8 +722,9 @@ class LeafSession:
             self.run(path, TILT_SPEED, 'tilt')
             self.held('tilt')
         r = np.linalg.norm((cur[:3, 3] - pivot)[:2])
-        return (f'tilt the leaf {tilt:.0f} deg up about its J, from {now:.0f} to '
-                f'{TILT_TO_DEG:.0f} deg ({r * 1000:.0f} mm behind the nozzle), '
+        return (f'tilt the leaf {tilt:.0f} deg up about the plant centre, '
+                f'from {now:.0f} to {TILT_TO_DEG:.0f} deg ({r * 1000:.0f} mm '
+                'from the nozzle), '
                 f'at {TILT_SPEED:.0f}%', run)
 
     def s_us_on(self):
