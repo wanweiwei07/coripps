@@ -45,7 +45,11 @@ WHITE = 235                     # grey counted clipped (the cameras top at ~237)
 # DARK_WARN: the light is not EXPOSURE's -- said so
 CLIPPED_WARN = 0.05
 DARK_WARN = 10.0
-FRAMES_TIMEOUT = 2.0            # s, waited at most for a pair taken now
+FRAMES_TIMEOUT = 8.0            # s, waited at most for a pair taken now
+                                # (past GRAB_GIVE_UP: a starved pair waited)
+GRAB_RETRY = 0.1                # s between tries when a pair does not come
+GRAB_REOPEN = 1.0               # s without one: the cameras reopened
+GRAB_GIVE_UP = 5.0              # s without one: given up
 LABELS = {side: f'sampler {side} camera' for side in PORTS}
 WINDOW = 'sampler stereo (q quits)'
 
@@ -61,6 +65,7 @@ class StereoCam:
         self._new = threading.Condition()
         self._stop = threading.Event()
         self._thread = None
+        self._exposure = exposure
         try:
             for side in PORTS:
                 self.cams[side] = WebCam(PORTS[side], LABELS[side])
@@ -72,9 +77,15 @@ class StereoCam:
         self._thread.start()
 
     def _grab(self):
-        caps = [self.cams[side].cap for side in PORTS]
+        # a pair that does not come is waited out, not given up at once:
+        # another camera on the same hub opened (the picker's, looking at a
+        # cap) can starve these for a moment -- tried again every
+        # GRAB_RETRY, the cameras reopened after GRAB_REOPEN, given up after
+        # GRAB_GIVE_UP without a pair
+        failing, reopened = None, False
         while not self._stop.is_set():
             t = time.perf_counter()
+            caps = [self.cams[side].cap for side in PORTS]
             pics = []
             ok = all(cap.grab() for cap in caps)
             for cap in caps if ok else ():
@@ -82,14 +93,43 @@ class StereoCam:
                 if not ok:
                     break
                 pics.append(pic)
-            with self._new:
-                if ok:
+            if ok:
+                if failing is not None:
+                    print(f'sampler cameras: back after '
+                          f'{t - failing:.1f} s without a picture')
+                failing, reopened = None, False
+                with self._new:
                     self._pair = t, tuple(pics)
-                else:
-                    self._error = 'a camera gives no image'
-                self._new.notify_all()
-            if not ok:
+                    self._new.notify_all()
+                continue
+            if failing is None:
+                failing = t
+                print('sampler cameras: no picture -- waiting for it')
+            if t - failing > GRAB_GIVE_UP:
+                with self._new:
+                    self._error = (f'a camera gives no image (for '
+                                   f'{GRAB_GIVE_UP:.0f} s)')
+                    self._new.notify_all()
                 return
+            if not reopened and t - failing > GRAB_REOPEN:
+                reopened = True
+                try:
+                    self._reopen()
+                    print('sampler cameras: reopened')
+                except RuntimeError as exc:
+                    print(f'sampler cameras: reopening failed ({exc})')
+            time.sleep(GRAB_RETRY)
+
+    def _reopen(self):
+        """Both cameras closed and opened again, at their exposure."""
+        for side in PORTS:
+            try:
+                self.cams[side].close()
+            except Exception:
+                pass
+        for side in PORTS:
+            self.cams[side] = WebCam(PORTS[side], LABELS[side])
+            self._expose(side, self._exposure)
 
     def _expose(self, side, step):
         """Manual exposure ``step`` on ``side``, frames read until two in a

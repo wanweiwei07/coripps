@@ -35,7 +35,12 @@ _BASE_POS = np.zeros(3, dtype=np.float32)
 _TUBE_PICKER_ROTMAT = np.eye(3, dtype=np.float32)
 _TUBE_PICKER_POS = np.array([0.0, 0.0, 0.005], dtype=np.float32)
 _LEAF_SAMPLER_ROTMAT = oum.rotmat_from_axangle(ouc.StandardAxis.Z, -np.pi / 2.0)
-_LEAF_SAMPLER_POS = np.array([0.42, 0.031, 0.005], dtype=np.float32)
+# the sampler's base: (0.42, 0.031, 0.005) by the CAD, moved by what the
+# nozzle's calibration (xh430_cutter/calibrate_center.py, 2026-11-19) found
+# at two CAD points (294.5, -59.75) / (253.5, -44.75) mm: the nozzle there
+# by the model at (+1.94, -6.60) / (+1.19, -5.43) mm off -- the mean taken
+_LEAF_SAMPLER_POS = np.array([0.42 + 0.00157, 0.031 - 0.00601, 0.005],
+                             dtype=np.float32)
 # the capper's frame (its hinge) on the platform
 _CAPPER_POS = (_BASE_POS + _BASE_ROTMAT @ HINGE_POS).astype(np.float32)
 

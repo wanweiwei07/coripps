@@ -318,14 +318,56 @@ def leaf_frames(color, depth, K, tf_w_cam, segmenter, near=None,
                        'J_px': j_px, 'mask': mask > 0,
                        'blade_pts': depth_points(inner, z_map, K,
                                                  tf_w_cam),
-                       'room': room, 'room_ends': room_ends})
+                       'room': room, 'room_ends': room_ends,
+                       'oval': ovalness(mask > 0)})
     return leaves, rosette
 
 
-def choose(leaves):
+SKIP_RADIUS = 0.015             # m: a leaf whose C is this near (seen from
+                                # above) a skipped point counts as that leaf
+MIN_CJ = 0.005               # m: a leaf whose C is nearer its J is too
+                                # small to take (the nozzle, the blade)
+MIN_OVAL = 0.85                 # a blade this like its ellipse (IoU) is
+                                # whole; less: partly hidden (another leaf
+                                # over it), its C and J off -- not taken
+
+
+def ovalness(mask):
+    """How like an ellipse the blade ``mask`` (bool) is: the IoU of it and
+    the ellipse fitted to its outline; 0 when too small to fit."""
+    m = np.asarray(mask, np.uint8)
+    cnts, _ = cv2.findContours(m, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+    if not cnts:
+        return 0.0
+    cnt = max(cnts, key=cv2.contourArea)
+    if len(cnt) < 5:
+        return 0.0
+    ell = np.zeros_like(m)
+    cv2.ellipse(ell, cv2.fitEllipse(cnt), 1, -1)
+    inter = np.logical_and(m, ell).sum()
+    union = np.logical_or(m, ell).sum()
+    return float(inter / union) if union else 0.0
+
+
+def takeable(leaf, skip=()):
+    """True when ``leaf`` may be taken: its blade near an ellipse (at least
+    MIN_OVAL -- whole, not partly hidden), its C at least MIN_CJ from its
+    J, and not within SKIP_RADIUS (horizontally) of a point in ``skip``."""
+    return (leaf.get('oval', 1.0) >= MIN_OVAL
+            and np.linalg.norm(leaf['C'] - leaf['J']) >= MIN_CJ
+            and all(np.linalg.norm(leaf['C'][:2] - np.asarray(p)[:2])
+                    > SKIP_RADIUS for p in skip))
+
+
+def choose(leaves, skip=()):
     """Index of the leaf with the most room for the cutter's blades: the
-    largest smaller-side room at J."""
-    return int(np.argmax([min(leaf['room']) for leaf in leaves]))
+    largest smaller-side room at J -- of the :func:`takeable` leaves (C at
+    least MIN_CJ from J; not near a point in ``skip``, e.g. the Cs of the
+    leaves tried already); None when none is left."""
+    rooms = [min(leaf['room']) if takeable(leaf, skip) else -np.inf
+             for leaf in leaves]
+    k = int(np.argmax(rooms))
+    return None if rooms[k] == -np.inf else k
 
 
 def draw(image, leaves, rosette, chosen):

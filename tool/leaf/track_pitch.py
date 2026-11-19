@@ -1,11 +1,12 @@
-"""Track the chosen leaf's pitch live: the sampler goes to the second look
+"""Track the chosen leaf's pitch live: the sampler goes to the close look
 as ``suc_cut_store.py`` does (its steps 1-5), then, over and over, looks
 at the leaf and turns the nozzle to its pitch -- tilt the pot by hand and
 the nozzle follows. A test of the stereo's pitch (its J -> C axis), the
 nozzle NOT over the leaf: from the second look's pose, the leaf clear of
 the cutter in the picture (over it the cutter hides J).
 
-    1-5 as suc_cut_store.py: search, find the plant, observe, look, closer
+    1-5 as suc_cut_store.py: search, find the plant, observe, look, to the
+        close look (the eye CLOSE_LOOK_HEIGHT over the plant's top)
         (each after 'g')
     then, after 'g', until q / Esc in the terminal or the window closed:
         a frame; the leaves (SAM 3 once, 'leaf' -- the plant and both eyes
@@ -40,7 +41,7 @@ import numpy as np
 from one.drivers.cobotta import BCapError
 
 from coripps.tool.keys import _quit_pressed, _wait_for_g
-from coripps.tool.leaf.suc_cut_store import LeafSession
+from coripps.tool.leaf.suc_cut_store import CLOSE_LOOK_HEIGHT, LeafSession
 from coripps.vision.sampler_stereo import leaf_pipeline as lp
 from coripps.vision.sampler_stereo import leaves as lv
 
@@ -106,7 +107,7 @@ def track(session, shown, stop):
     cloud and leaf frame put in ``shown`` (under its 'lock')."""
     sampler, eye = session.sampler, session.eye
     leaf = session.leaf
-    # the eye kept as high over the leaf as the second look puts it
+    # the eye kept as high over the leaf as the close look puts it
     over_c = session.plant['plant_z'] - leaf['C'][2]
     pitches = []
     pitch = 0.0                     # the nozzle's: level at the start
@@ -151,7 +152,8 @@ def track(session, shown, stop):
         for share in (1.0,) + TRACK_FALLBACK:
             goal = lp.relook_goal(sampler, session.pln_ctx,
                                   session.tf_flange_cam, eye, leaf,
-                                  leaf['C'][2] + over_c, qs, step * share)
+                                  leaf['C'][2] + over_c, qs, step * share,
+                                  height=CLOSE_LOOK_HEIGHT)
             if goal is not None:
                 break
         if goal is None:
@@ -255,7 +257,7 @@ def main():
         return False
     try:
         makers = [session.s_search, session.s_find_plant, session.s_observe,
-                  session.s_look, session.s_closer]
+                  session.s_look, session.s_close]
         for k, make in enumerate(makers, 1):
             what, run = make()
             if not _wait_for_g(f'step {k}/{len(makers)}: {what}'):

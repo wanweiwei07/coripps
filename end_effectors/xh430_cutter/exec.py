@@ -118,6 +118,17 @@ CONFIG = Config()
 _SETTLE_TICKS = 2               # movement below this counts as stopped
 _SETTLE_POLLS = 4
 
+# The cut (:meth:`XH430CutterExec.cut`) -- how the blade is pushed through,
+# the one place it is set: the bench test and the robot's take both use it.
+CUT_SLOW_DEG = 20.0    # the last this much of the travel (where the blade
+                        # crosses the nozzle's mouth) ...
+CUT_STEP_DEG = 3.0      # ... a step at a time, the ultrasonic given
+CUT_STEP_DWELL = 0.3    # s at each step to work through before the next
+CUT_SLOW_VEL = 5  # ... at this profile velocity (Config's is 60)
+CUT_PASSES = 1        # pushed through this many times: backed off
+                        # CUT_SLOW_DEG and slowly out again
+CUT_DWELL = 0.5         # s, held out at the end of each pass
+
 
 class XH430CutterExec:
     """The XH430 cutter as deploy/retract verbs instead of registers."""
@@ -268,6 +279,43 @@ class XH430CutterExec:
     def retract(self, wait=True):
         """Pull the blade back in."""
         return self.move_to_deg(0.0, wait=wait)
+
+    def cut(self, slow_deg=CUT_SLOW_DEG, slow_vel=CUT_SLOW_VEL,
+            passes=CUT_PASSES, dwell=CUT_DWELL, go_on=None,
+            step_deg=CUT_STEP_DEG, step_dwell=CUT_STEP_DWELL):
+        """The cut: out at the normal speed to ``slow_deg`` short of the
+        travel, the rest at ``slow_vel`` ``step_deg`` at a time, held
+        ``step_dwell`` at each (the ultrasonic works through the petiole
+        before the blade goes on -- pushed straight through, it only shoves
+        it); then ``passes - 1`` more times
+        backed off ``slow_deg`` and slowly out again, ``dwell`` held at the
+        end of each. Ends deployed. Motion only -- the ultrasonic is the
+        caller's. ``go_on``: asked after each pass, False stops there (e.g.
+        ``sealed`` -- the blade pushed the leaf off). Returns the angle each
+        pass reached: short of the travel, the blade stalled (on the
+        petiole) at the current ceiling."""
+        travel = self.cfg.travel_deg
+        slow_from = travel - slow_deg
+        reached = []
+        self.move_to_deg(slow_from)
+        self.dxl.write('profile_velocity', slow_vel)
+        try:
+            for k in range(passes):
+                if k:
+                    self.move_to_deg(slow_from)
+                n = max(int(np.ceil(slow_deg / step_deg)), 1)
+                for i in range(1, n + 1):
+                    self.move_to_deg(slow_from + slow_deg * i / n)
+                    time.sleep(step_dwell if i < n else dwell)
+                reached.append(self.angle_deg())
+                print(f'cutter: cut pass {k + 1}/{passes} reached '
+                      f'{reached[-1]:.1f} of {travel:.0f} deg')
+                if go_on is not None and not go_on():
+                    print('cutter: cut stopped (go_on said no)')
+                    break
+        finally:
+            self.dxl.write('profile_velocity', self.cfg.profile_velocity)
+        return reached
 
 
 # ---------------------------------------------------------------------------

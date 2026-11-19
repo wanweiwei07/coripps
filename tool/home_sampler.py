@@ -1,7 +1,7 @@
 """Send the sampler (the COBOTTA at 192.168.0.101) to its home joint pose.
 
-Home: the cutter's tcp at (100, -50, 100) mm in the sampler's base frame,
-pointing straight down (the start / retreat pose of
+Home: the cutter's tcp at (150, -50, 130) mm in the sampler's base frame,
+pointing straight down, J6 near 0 (the start / retreat pose of
 ``coripps.single_routine``), as joint angles.
 
 Headless: no viewer, nothing to press. The picker is read once and baked into
@@ -34,8 +34,11 @@ _CD_STEP_SIZE = np.pi / 180
 _EXTEND_STEP_SIZE = np.pi / 36
 _MAX_ITERS = 3000
 _ARRIVAL_TOLERANCE = np.deg2rad(0.5)
-# the cutter tcp at (100, -50, 100) mm (base frame), pointing down
-_HOME_QS_DEG = (-6.28, -10.91, 132.23, 0.0, 58.68, -36.28)
+# the cutter tcp at (150, -50, 130) mm (base frame), pointing down, turned
+# about the vertical for J6 near 0 (the wrist's hose and cable untwisted)
+# -- was (100, -50, 100), J6 -36 deg (-6.28, -10.91, 132.23, 0, 58.68, -36.28):
+# the cables too near the arm, the wrist wound up
+_HOME_QS_DEG = (-8.72, 0.15, 111.73, 0.0, 68.12, 1.28)
 
 
 def _build(obstacles=()):

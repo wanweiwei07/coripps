@@ -6,10 +6,11 @@ tube, the capper closes it, the picker pops the tube out and discards it.
     --------------------------              ------------------------
     home (the start)                        home (the start)
     ---- both there: go on ------------------------------------------------
-    pick the tube, place it in the          observe, look, over the plant,
-    capper, push it home                    look again, onto the leaf, suck,
-      (pick_cap_store steps 1-14)           cut, lift
-    back home                                 (suc_cut_store steps 1-12)
+    pick the tube, place it in the          observe, look, the close look,
+    capper, push it home                    onto the leaf, suck (centred),
+      (pick_cap_store steps 1-14)           tilt, cut, lift -- a failed
+    back home                                 take: another leaf, MAX_TRIES
+                                              (suc_cut_store steps 1-14)
     capper: open the cap (the arm away)
     ---- CAP_OPEN ---------------------->   wait for CAP_OPEN
                                             over the tube, into it, blow,
@@ -26,14 +27,14 @@ tube, the capper closes it, the picker pops the tube out and discards it.
 
 Each robot starts at, retreats to and ends at its home (``home_picker`` /
 ``home_sampler``): the picker's grasp_center at (100, -100, 100) mm, the
-sampler's cutter tcp at (100, -50, 100) mm, each in its own base frame,
+sampler's cutter tcp at (150, -50, 130) mm, each in its own base frame,
 pointing down.
 
 FIRST A SIMULATION of the whole routine, from both robots' real joints:
 the same steps and handshakes, every move planned but only recorded, the
 grippers / capper / cutter only logged, the sampler's stereo pair replaced
 by the raw pairs the last real run saved (``vision/sampler_stereo/observe/``:
-``plant_``, then the look's, then ``relook_``; SAM 3 and the depth run on
+``plant_``, then the look's, then ``close_``; SAM 3 and the depth run on
 them as on the real frames) and the picker's look at the cap by a long tab
 at SIM_TAB_DEG (only the grip's plan is checked). The viewer loops it -- 0: both to their start,
 A: both until CAP_OPEN, B: the sampler storing the leaf, C: the sampler
@@ -79,7 +80,8 @@ from coripps.end_effectors.xh430_capper.exec import (XH430CapperExec,
 from coripps.robots.leaf_sampler import LeafSampler
 from coripps.robots.tube_picker import TubePicker
 from coripps.tool.home_sampler import _HOME_QS_DEG as SAMPLER_HOME_QS_DEG
-from coripps.tool.leaf.suc_cut_store import LeafSession
+import coripps.end_effectors.xh430_cutter.exec as xcut
+from coripps.tool.leaf.suc_cut_store import LeafSession, TakeFailed, MAX_TRIES
 from coripps.tool.home_picker import HOME_QS_DEG
 from coripps.tool.tube.pick_sequence_single import PickSession
 from coripps.vision.sampler_stereo import depth as sd
@@ -293,9 +295,11 @@ def sampler_home(session, label='back home'):
 
 def sampler_flow(shared, session):
     """The sampler's thread."""
-    makers = session.steps()
-    cut = makers.index(session.s_to_capper)
-    before, store = makers[:cut], makers[cut:]  # up to the lift / the store
+    def split(makers):                  # up to the lift / the store
+        cut = makers.index(session.s_to_capper)
+        return makers[:cut], makers[cut:]
+
+    before, store = split(session.steps())
 
     def run(make):
         if shared.stop.is_set():
@@ -306,6 +310,33 @@ def sampler_flow(shared, session):
         step()
         return True
 
+    def take():
+        """The steps up to the lift; a failed take (not sealed, not cut,
+        the leaf lost, not plannable at its pitch) backed up from and
+        tried again on another leaf, MAX_TRIES in all (as
+        ``suc_cut_store.main``); all failed: backed up off the plant,
+        False."""
+        makers, tries = before, 1
+        k = 0
+        while k < len(makers):
+            try:
+                if not run(makers[k]):
+                    return False
+                k += 1
+            except TakeFailed as exc:
+                session.drop_take()
+                session.tried.append(session.leaf['C'])
+                if tries >= MAX_TRIES:
+                    print(f'sampler: {exc} -- {tries} tries failed: given '
+                          'up, backing up off the plant')
+                    run(session.s_back_up)
+                    return False
+                tries += 1
+                print(f'sampler: {exc} -- back up, look again, take another '
+                      f'leaf (try {tries}/{MAX_TRIES})')
+                makers, k = split(session.steps(retake=True))[0], 0
+        return True
+
     try:
         if not run(lambda: sampler_home(session, 'to the start: home')):
             return False
@@ -314,9 +345,8 @@ def sampler_flow(shared, session):
         if not shared.wait(shared.picker_ready, 'sampler',
                            'the picker at its start'):
             return False
-        for make in before:
-            if not run(make):
-                return False
+        if not take():
+            return False
         if not shared.wait(shared.cap_open, 'sampler',
                            'the cap open and the picker away'):
             return False
@@ -384,20 +414,48 @@ class _SimCapper:
 
 
 class _SimCutter:
+    """The cutter in the simulation: each verb logged; the nozzle sealed
+    at once (the take's descent stops as soon as the vacuum goes on), the
+    blade's cut through."""
+
+    cfg = xcut.CONFIG
+
     def __init__(self, log):
         self.log = log
+
+    def sealed(self):
+        return True
+
+    def cut(self, *args, **kwargs):
+        self.log.append('cutter cut')
+        return [self.cfg.travel_deg]
 
     def __getattr__(self, name):
         return lambda *args, **kwargs: self.log.append(
             f'cutter {name}{args if args else ""}')
 
 
+class _SimArm:
+    """The sampler's arm in the simulation, for the steps that drive it
+    directly (the take's descent, a waypoint at a time)."""
+
+    def __init__(self, move):
+        self.move = move
+
+    def enable(self, *args, **kwargs):
+        pass
+
+    def move_path(self, path):
+        self.move(path)
+
+
 class _ReplayEye(lp.Eye):
     """The sampler's eye in the simulation: the raw pairs the last real run
     saved to ``observe/``, one per frame in the order the steps take them
-    (find the plant, look, look again), rectified and matched as live."""
+    (find the plant, look, the close look), rectified and matched as live
+    -- the descent's centring on the leaf is left out (no pairs saved)."""
 
-    PREFIXES = ('plant_', '', 'relook_')
+    PREFIXES = ('plant_', '', 'close_')
 
     def __init__(self):
         self.rect = sd.rectifier()
@@ -407,10 +465,12 @@ class _ReplayEye(lp.Eye):
         self.cam = self
         self._next = 0
 
-    def frames(self):
-        if self._next >= len(self.PREFIXES):
-            raise RuntimeError('simulation: no saved pair left to replay')
-        prefix = self.PREFIXES[self._next]
+    def frames(self, *args, **kwargs):
+        # past the last: the look's and the close look's again (a retake
+        # after a failed take looks again)
+        n = len(self.PREFIXES)
+        k = self._next if self._next < n else 1 + (self._next - n) % (n - 1)
+        prefix = self.PREFIXES[k]
         self._next += 1
         pair = []
         for side in ('left', 'right'):
@@ -471,6 +531,9 @@ def simulate(picker, sampler, plan):
                (sampler, 'run', s_run),
                (sampler, 'eye', _ReplayEye()),
                (sampler, 'cutter', _SimCutter(log)),
+               (sampler, 'cobotta', _SimArm(
+                   lambda path: s_run([sim['s']] + list(path), None, 'arm'))),
+               (sampler, 'servo_error', lambda *args, **kwargs: None),
                (lp, 'save_frame', lambda *args, **kwargs: None)]
     saved = [(obj, name, obj.__dict__.get(name)) for obj, name, _ in patches]
     for obj, name, value in patches:
@@ -727,7 +790,9 @@ def plan_picker(picker):
     return pcs.plan_tube(picker, cap_poses, None)
 
 
-def main(tube=pcs.TUBE_INDEX):
+def main(tube=pcs.TUBE_INDEX, leaf=None):
+    """``leaf``: (x, y) mm, the leaf to take -- the one whose C is nearest,
+    the choice rules not applied (a failed take: by the rules again)."""
     try:
         picker = PickSession(tube)
     except RuntimeError as exc:
@@ -750,6 +815,8 @@ def main(tube=pcs.TUBE_INDEX):
         capper.disconnect()
         picker.release()
         return False
+    if leaf is not None:
+        sampler.target = np.asarray(leaf, np.float64) / 1000.0
     pcs.print_plan(plan)
     run = {}
     try:
@@ -784,5 +851,10 @@ if __name__ == '__main__':
     parser.add_argument('--tube', type=int, default=pcs.TUBE_INDEX,
                         help=f'precomputed pick index (default '
                              f'{pcs.TUBE_INDEX})')
+    parser.add_argument('--leaf', type=float, nargs=2, metavar=('X', 'Y'),
+                        default=None,
+                        help='the leaf to take: the one whose C is nearest '
+                             '(x, y) mm, world -- the choice rules not '
+                             'applied')
     args = parser.parse_args()
-    sys.exit(0 if main(tube=args.tube) else 1)
+    sys.exit(0 if main(tube=args.tube, leaf=args.leaf) else 1)

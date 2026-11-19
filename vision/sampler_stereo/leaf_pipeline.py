@@ -312,11 +312,11 @@ def observe_goal(sampler, pln_ctx, tf_flange_cam, eye, plant, near,
 
 
 def relook_goal(sampler, pln_ctx, tf_flange_cam, eye, leaf, plant_z, near,
-                pitch=0.0):
+                pitch=0.0, height=RELOOK_HEIGHT):
     """Joints for the second look, the tcp already turned as for the take
     about the vertical (``leaf``'s J -> C), level -- or pitched ``pitch``
     (rad, + its J -> C axis up, the nozzle square to it) -- after it only
-    moved: the eye RELOOK_HEIGHT over the plant's top ``plant_z``, the
+    moved: the eye ``height`` over the plant's top ``plant_z``, the
     leaf (C, J and LEAF_VIEW_MARGIN round them) shifted to where the cutter
     does not hide it in the picture; None when there is none (said
     why)."""
@@ -334,7 +334,7 @@ def relook_goal(sampler, pln_ctx, tf_flange_cam, eye, leaf, plant_z, near,
     tcp_rot = np.column_stack([x, y, np.cross(x, y)])
     rot = tcp_rot @ tf_tcp_cam[:3, :3]
     mid = (leaf['C'] + leaf['J']) / 2
-    eye_z = plant_z + RELOOK_HEIGHT
+    eye_z = plant_z + height
     span = np.linalg.norm(leaf['C'] - leaf['J']) / 2 + LEAF_VIEW_MARGIN
     dist = (eye_z - mid[2]) / -rot[2, 2]             # along the eye's axis
     mask = tool_mask(sampler, tf_flange_cam, eye, dist)
@@ -488,10 +488,12 @@ def _save_leaves(color, leaves, rosette, chosen, prefix):
                 lv.draw(lv.normalize(color), leaves, rosette, chosen))
 
 
-def look(eye, sampler, qs, tf_flange_cam, segmenter, plant, prefix=''):
+def look(eye, sampler, qs, tf_flange_cam, segmenter, plant, prefix='',
+         skip=()):
     """A frame from joints ``qs``, saved; of ``plant``
     (:func:`find_plant`), ``(leaves, chosen index)``, or None when no leaf
-    is found."""
+    is found. ``skip``: world points (the Cs of leaves tried already) --
+    the leaves there not chosen; chosen None when no other is left."""
     color, depth, K = eye.frame()
     save_frame(color, depth, K, qs, prefix, eye.pair)
     cam_tf = tf_w_cam(sampler, qs, tf_flange_cam)
@@ -500,7 +502,7 @@ def look(eye, sampler, qs, tf_flange_cam, segmenter, plant, prefix=''):
     if found is None:
         return None
     leaves, rosette = found
-    chosen = lv.choose(leaves)
+    chosen = lv.choose(leaves, skip)
     _save_leaves(color, leaves, rosette, chosen, prefix)
     return leaves, chosen
 

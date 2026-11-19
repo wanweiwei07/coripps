@@ -49,8 +49,11 @@ _L3 = float(np.linalg.norm(_C0 - _D))      # 24 mm
 # link1 travel, ccw about +Y -- the ONE place it is set: exec.py derives the
 # real servo's deploy target from it (157 deg ran clean on the bench)
 TRAVEL = np.deg2rad(157.0)
-# the tool centre point in the base frame (m), axes as the base's
-_TCP = (0.014161, 0.0175, 0.118)
+# the tool centre point in the base frame (m), axes as the base's -- x, y
+# calibrated on the sampler (calibrate_center.py, 2026-11-19: 4 hand
+# orientations, residual rms 0.09 mm); z the model's (not observable there).
+# The model's own was (0.014161, 0.0175, 0.118)
+_TCP = (0.014597, 0.014359, 0.118)
 
 
 def _phi(v):
