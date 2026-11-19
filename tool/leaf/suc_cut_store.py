@@ -357,6 +357,8 @@ class LeafSession:
             why.append(f'oval<{lv.MIN_OVAL:.2f}')
         if cj < lv.MIN_CJ:
             why.append(f'C-J<{lv.MIN_CJ * 1000:.0f}')
+        if min(lf['room']) < lv.MIN_ROOM:
+            why.append(f'room<{lv.MIN_ROOM:.0f}')
         if any(np.linalg.norm(lf['C'][:2] - np.asarray(p)[:2])
                <= lv.SKIP_RADIUS for p in self.tried):
             why.append('tried')
@@ -385,8 +387,10 @@ class LeafSession:
                 lv.normalize(color), leaves, chosen,
                 [self.leaf_row(i, lf, short=True)
                  for i, lf in enumerate(leaves)]
-                + ['mm, deg; C-J >= %.0f, oval >= %.2f to be taken'
-                   % (lv.MIN_CJ * 1000, lv.MIN_OVAL)], title,
+                + ['mm, deg; taken: C-J >= %.0f, oval >= %.2f, room >= %.0f'
+                   % (lv.MIN_CJ * 1000, lv.MIN_OVAL, lv.MIN_ROOM),
+                   'chosen: the highest J (within %.0f mm), then the most '
+                   'room' % (lv.HEIGHT_BAND * 1000)], title,
                 takeable=lambda lf: lv.takeable(lf, self.tried))
             monitor.publish(img, monitor.cloud_world(color, depth, K, cam_tf))
         except Exception as exc:        # the view only -- go on
@@ -420,8 +424,9 @@ class LeafSession:
                               f"{'none' if chosen is None else chosen}",
                               leaves, chosen)
             if chosen is None:
-                raise RuntimeError(f'look: no leaf to take -- C at least '
-                                   f'{lv.MIN_CJ * 1000:.0f} mm from J, not '
+                raise RuntimeError(f'look: no leaf to take -- whole, C at '
+                                   f'least {lv.MIN_CJ * 1000:.0f} mm from J, '
+                                   f'{lv.MIN_ROOM:.0f} mm room at J, not '
                                    f'one of the {len(self.tried)} tried')
             self.leaf = leaves[chosen]
             self.leaves = leaves            # the others: s_close's fallback
@@ -438,12 +443,12 @@ class LeafSession:
         shifted so the chosen leaf is clear of the cutter in the
         picture (from over it, at the approach, the nozzle hides it);
         straight there, or planned if not. No such pose / path for the
-        chosen leaf: the next of this look's leaves (by room, the tried
-        ones left out) -- not a failed take, nothing touched yet."""
+        chosen leaf: the next of this look's leaves (``lv.rank``: the
+        highest, then the most room; the tried ones left out) -- not a
+        failed take, nothing touched yet."""
         start = self.qs_now()
-        rest = sorted((lf for lf in self.leaves if lf is not self.leaf
-                       and lv.takeable(lf, self.tried)),
-                      key=lambda lf: -min(lf['room']))
+        rest = [self.leaves[k] for k in lv.rank(self.leaves, self.tried)
+                if self.leaves[k] is not self.leaf]
         for leaf in [self.leaf] + rest:
             got = self.close_path(start, leaf)
             if got is not None:

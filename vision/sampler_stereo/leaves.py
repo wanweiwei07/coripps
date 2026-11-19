@@ -29,9 +29,12 @@ background):
     not used: C and J ~1 cm apart, the stereo's mm put it anywhere in
     +-30 deg, while a leaf here is about level (J at most ~3 deg over C, a
     small one ~0)
-The leaf to cut: the most free room on both sides of the petiole at J (other
-blades, and the other petioles taken as lines from their J to the rosette
-centre, are in the way), so the blades of the cutter can get in.
+The leaf to cut (:func:`rank`): of the takeable ones (whole, C at least
+MIN_CJ from J, at least MIN_ROOM free on both sides of the petiole at J --
+other blades, and the other petioles taken as lines from their J to the
+rosette centre, are in the way -- so the cutter's blades can get in), the
+highest by its J (off the soil and the pot's rim); those within
+HEIGHT_BAND of it as high, the one with the most room of them.
 """
 
 import cv2
@@ -330,6 +333,10 @@ MIN_CJ = 0.005               # m: a leaf whose C is nearer its J is too
 MIN_OVAL = 0.85                 # a blade this like its ellipse (IoU) is
                                 # whole; less: partly hidden (another leaf
                                 # over it), its C and J off -- not taken
+MIN_ROOM = 1.0                  # mm free on both sides of the petiole at J:
+                                # less, the blades do not get in
+HEIGHT_BAND = 0.005             # m: Js this near the highest one's height
+                                # count as as high (the stereo's ~1 mm)
 
 
 def ovalness(mask):
@@ -352,22 +359,35 @@ def ovalness(mask):
 def takeable(leaf, skip=()):
     """True when ``leaf`` may be taken: its blade near an ellipse (at least
     MIN_OVAL -- whole, not partly hidden), its C at least MIN_CJ from its
-    J, and not within SKIP_RADIUS (horizontally) of a point in ``skip``."""
+    J, at least MIN_ROOM free on both sides of its petiole at J, and not
+    within SKIP_RADIUS (horizontally) of a point in ``skip``."""
     return (leaf.get('oval', 1.0) >= MIN_OVAL
             and np.linalg.norm(leaf['C'] - leaf['J']) >= MIN_CJ
+            and min(leaf['room']) >= MIN_ROOM
             and all(np.linalg.norm(leaf['C'][:2] - np.asarray(p)[:2])
                     > SKIP_RADIUS for p in skip))
 
 
+def rank(leaves, skip=()):
+    """Indices of the :func:`takeable` leaves (``skip``: e.g. the Cs of the
+    leaves tried already), the one to take first: the highest by its J --
+    of those within HEIGHT_BAND of the highest, the one with the most room
+    (the smaller side at J) -- then the same of the rest."""
+    left = [k for k, leaf in enumerate(leaves) if takeable(leaf, skip)]
+    out = []
+    while left:
+        top = max(leaves[k]['J'][2] for k in left)
+        k = max((k for k in left if leaves[k]['J'][2] >= top - HEIGHT_BAND),
+                key=lambda k: min(leaves[k]['room']))
+        out.append(k)
+        left.remove(k)
+    return out
+
+
 def choose(leaves, skip=()):
-    """Index of the leaf with the most room for the cutter's blades: the
-    largest smaller-side room at J -- of the :func:`takeable` leaves (C at
-    least MIN_CJ from J; not near a point in ``skip``, e.g. the Cs of the
-    leaves tried already); None when none is left."""
-    rooms = [min(leaf['room']) if takeable(leaf, skip) else -np.inf
-             for leaf in leaves]
-    k = int(np.argmax(rooms))
-    return None if rooms[k] == -np.inf else k
+    """The first of :func:`rank`, None when no leaf is takeable."""
+    order = rank(leaves, skip)
+    return order[0] if order else None
 
 
 def draw(image, leaves, rosette, chosen):
