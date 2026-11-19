@@ -12,7 +12,7 @@ run out; a cycle that does not finish (no leaf left, no path, a failure,
 The hardware is connected and SAM 3 loaded once; no simulation (run
 ``single_routine.py`` for one). A live view (``coripps.monitor``) shows
 the cell as it is: both robots, the rack's tubes (the worked one red), the
-sampler's last look -- its point cloud, and a picture window with the
+sampler's last look -- its point cloud, and a panel in the viewer with the
 leaves, the chosen one and every leaf's numbers. 'g' (in the viewer or the
 terminal) runs all the cycles back to back; 'q' / Esc stops both robots
 before their next step; closing the viewer stops them too.

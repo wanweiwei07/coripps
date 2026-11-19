@@ -44,10 +44,10 @@ blade, lift it, and put it into the tube in the capper.
        all, then given up
 
 Each step waits for 'g' (q / Esc / Ctrl+C stop; in the console, the
-viewer or the picture's window); ``--c`` runs straight through (q stops
+viewer); ``--c`` runs straight through (q stops
 before the next step). The live view (``coripps.monitor``) runs beside:
-the arms where they are, the last look's point cloud, and a picture
-window -- the vision steps' leaves (the chosen green, the candidates
+the arms where they are, the last look's point cloud, and a panel in it
+-- the left eye's picture: the vision steps' leaves (the chosen green, the candidates
 yellow, the others grey) with a table of every leaf's numbers and why it
 is not taken; after a motion the left eye now with the plant's circle and
 the chosen leaf's C -> J where they are. Closing the viewer stops before
@@ -347,14 +347,13 @@ class LeafSession:
                 f'{height * 1000:.0f} mm, {len(path)} waypoints)',
                 lambda: self.run(path, FREE_SPEED, 'observe'))
 
-    def leaf_row(self, i, lf, short=False):
+    def leaf_row(self, i, lf, cells=False):
         """One leaf's numbers, one line: C, slope, ovalness, C - J, room,
-        and why it is not taken (``short``: as the live view's table)."""
+        and why it is not taken (``cells``: as the live view's table row,
+        J's height too)."""
         sl = leaf_pitch(lf)
         cj = np.linalg.norm(lf['C'] - lf['J'])
         why = []
-        if lf.get('oval', 1.0) < lv.MIN_OVAL:
-            why.append(f'oval<{lv.MIN_OVAL:.2f}')
         if cj < lv.MIN_CJ:
             why.append(f'C-J<{lv.MIN_CJ * 1000:.0f}')
         if min(lf['room']) < lv.MIN_ROOM:
@@ -362,13 +361,13 @@ class LeafSession:
         if any(np.linalg.norm(lf['C'][:2] - np.asarray(p)[:2])
                <= lv.SKIP_RADIUS for p in self.tried):
             why.append('tried')
-        if short:
+        if cells:
             c = lf['C'] * 1000
-            return (f"{i}: C ({c[0]:.0f},{c[1]:.0f},{c[2]:.0f}) slope "
-                    f"{'?' if sl is None else f'{np.degrees(sl):+.0f}'} oval "
-                    f"{lf.get('oval', float('nan')):.2f} C-J {cj * 1000:.1f} "
-                    f"room {min(lf['room']):.1f}"
-                    f"{'  NOT: ' + ' '.join(why) if why else ''}")
+            return [str(i), f'{c[0]:.0f}, {c[1]:.0f}, {c[2]:.0f}',
+                    f"{lf['J'][2] * 1000:.0f}",
+                    '?' if sl is None else f'{np.degrees(sl):+.0f}',
+                    f"{lf.get('oval', float('nan')):.2f}", f'{cj * 1000:.1f}',
+                    f"{min(lf['room']):.1f}", ' '.join(why)]
         return (f"leaf {i}: C {np.round(lf['C'] * 1000, 1)} mm, slope "
                 f"{'?' if sl is None else f'{np.degrees(sl):+.0f}'} deg, "
                 f"oval {lf.get('oval', float('nan')):.2f}, C-J "
@@ -383,16 +382,24 @@ class LeafSession:
             eye = self.eye
             color, depth, K = eye.last_color, eye.last_depth, eye.last_K
             cam_tf = lp.tf_w_cam(self.sampler, qs, self.tf_flange_cam)
-            img = monitor.look_image(
-                lv.normalize(color), leaves, chosen,
-                [self.leaf_row(i, lf, short=True)
-                 for i, lf in enumerate(leaves)]
-                + ['mm, deg; taken: C-J >= %.0f, oval >= %.2f, room >= %.0f'
-                   % (lv.MIN_CJ * 1000, lv.MIN_OVAL, lv.MIN_ROOM),
-                   'chosen: the highest J (within %.0f mm), then the most '
-                   'room' % (lv.HEIGHT_BAND * 1000)], title,
-                takeable=lambda lf: lv.takeable(lf, self.tried))
-            monitor.publish(img, monitor.cloud_world(color, depth, K, cam_tf))
+            ok = [lv.takeable(lf, self.tried) for lf in leaves]
+            img = monitor.look_image(lv.normalize(color), leaves, chosen,
+                                     takeable=lambda lf: lv.takeable(
+                                         lf, self.tried))
+            table = {
+                'head': ['#', 'C x, y, z', 'J z', 'slope', 'oval', 'C-J',
+                         'room', 'not taken'],
+                'rows': [(self.leaf_row(i, lf, cells=True),
+                          'chosen' if i == chosen else
+                          'ok' if ok[i] else 'no')
+                         for i, lf in enumerate(leaves)],
+                'notes': ['mm, deg; taken: C-J >= %.0f, room >= %.0f '
+                          '(oval shown only)' % (lv.MIN_CJ * 1000,
+                                                 lv.MIN_ROOM),
+                          'chosen: the highest J (within %.0f mm), then the '
+                          'most room' % (lv.HEIGHT_BAND * 1000)]}
+            monitor.publish(img, monitor.cloud_world(color, depth, K, cam_tf),
+                            title, table)
         except Exception as exc:        # the view only -- go on
             print(f'(live view: {exc})')
 
@@ -1010,7 +1017,7 @@ def take(session, continuous=False, idle=None):
             # the live view as they looked; after the others, the eye now
             if make.__name__ not in LeafSession._SAVED:
                 try:
-                    monitor.publish(session.view(make, title))
+                    monitor.publish(session.view(make, ''), title=title)
                 except Exception as exc:    # the picture only -- go on
                     print(f'(no picture: {exc})')
         if given_up:

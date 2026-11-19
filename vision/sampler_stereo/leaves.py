@@ -29,7 +29,7 @@ background):
     not used: C and J ~1 cm apart, the stereo's mm put it anywhere in
     +-30 deg, while a leaf here is about level (J at most ~3 deg over C, a
     small one ~0)
-The leaf to cut (:func:`rank`): of the takeable ones (whole, C at least
+The leaf to cut (:func:`rank`): of the takeable ones (C at least
 MIN_CJ from J, at least MIN_ROOM free on both sides of the petiole at J --
 other blades, and the other petioles taken as lines from their J to the
 rosette centre, are in the way -- so the cutter's blades can get in), the
@@ -330,9 +330,6 @@ SKIP_RADIUS = 0.015             # m: a leaf whose C is this near (seen from
                                 # above) a skipped point counts as that leaf
 MIN_CJ = 0.005               # m: a leaf whose C is nearer its J is too
                                 # small to take (the nozzle, the blade)
-MIN_OVAL = 0.85                 # a blade this like its ellipse (IoU) is
-                                # whole; less: partly hidden (another leaf
-                                # over it), its C and J off -- not taken
 MIN_ROOM = 1.0                  # mm free on both sides of the petiole at J:
                                 # less, the blades do not get in
 HEIGHT_BAND = 0.005             # m: Js this near the highest one's height
@@ -357,12 +354,12 @@ def ovalness(mask):
 
 
 def takeable(leaf, skip=()):
-    """True when ``leaf`` may be taken: its blade near an ellipse (at least
-    MIN_OVAL -- whole, not partly hidden), its C at least MIN_CJ from its
-    J, at least MIN_ROOM free on both sides of its petiole at J, and not
-    within SKIP_RADIUS (horizontally) of a point in ``skip``."""
-    return (leaf.get('oval', 1.0) >= MIN_OVAL
-            and np.linalg.norm(leaf['C'] - leaf['J']) >= MIN_CJ
+    """True when ``leaf`` may be taken: its C at least MIN_CJ from its J,
+    at least MIN_ROOM free on both sides of its petiole at J, and not
+    within SKIP_RADIUS (horizontally) of a point in ``skip``. (Its
+    ovalness, ``'oval'``, is shown, not used: the highest leaves, taken
+    first, are seldom hidden.)"""
+    return (np.linalg.norm(leaf['C'] - leaf['J']) >= MIN_CJ
             and min(leaf['room']) >= MIN_ROOM
             and all(np.linalg.norm(leaf['C'][:2] - np.asarray(p)[:2])
                     > SKIP_RADIUS for p in skip))
