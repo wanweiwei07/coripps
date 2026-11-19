@@ -8,11 +8,11 @@ error left them in, back to where a run starts.
     5   capper: home (where the picker places the tube)
 
 Each step on its own: one failing (a servo not answering, ...) is reported
-and the rest still run. The arms are not moved.
+and the rest still run. The arms are not moved (``reset_robot.py``).
 
 Headless, nothing to press.
 
-    py -3.12 coripps/tool/reset.py
+    py -3.12 coripps/tool/reset_ee.py
 """
 
 import sys
