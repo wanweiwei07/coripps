@@ -2,9 +2,12 @@
 
 Both are the "VGA USB Camera" model (640x480) with 1.7 mm fisheye lenses
 and no IR-cut filter (they see the 940 nm light; colours are off under
-room light). They sit on ports 1 and 3 of one hub, the hub on port 7 --
-the picker's camera is on a port 3 too, of another hub, so the ports are
-given with their hub's (``cameras.index_of``).
+room light). They sit on ports 1 and 3 of one hub, the hub on port 4 of
+the main hub -- the picker's camera is on a port 3 too, of another hub (on
+the main hub's port 3), so the ports are given with their hub's
+(``cameras.index_of`` matches the port path from the camera up). Only the
+hubs' own wiring is in them, not where the main hub plugs into the PC:
+another PC, another USB port, the same ports.
 
 The two are separate USB cameras, not synchronised: a thread of
 :class:`StereoCam` grabs both, then decodes both, over and over, and keeps
@@ -33,7 +36,7 @@ import numpy as np
 from one.vision.calibrate.handeye_capture import WebCam
 
 
-PORTS = {'left': (1, 7), 'right': (3, 7)}   # port, its hub's port
+PORTS = {'left': (1, 4), 'right': (3, 4)}   # port, its hub's port
 EXPOSURE = -7                   # set once when opened (2^-7 s), never again
 SETTLE_READS = 10               # frames read after setting it, at most ...
 SETTLE_REL = 0.03               # ... until two in a row agree this well

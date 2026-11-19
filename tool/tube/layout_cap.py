@@ -23,6 +23,7 @@ import numpy as np
 import one.utils.math as oum
 import one.utils.constant as ouc
 import coripps.tool.tube.layout_pick as layout
+from coripps.robots.mobisys import capper_tube_pos
 
 
 # ---- moving between poses ------------------------------------------------
@@ -52,12 +53,28 @@ TUBE_RADIUS = 0.013
 # the store's hole, where a tube let go there settles (seen by the picker's
 # camera alike from two hand turns 180 deg apart); the held tube is at
 # grasp_center (the gripper model's, measured), so it is placed right over it
-HOLE_XY = np.array([0.2535, -0.04475], dtype=np.float32)
-DROP_POS = np.array([*HOLE_XY, 0.152], dtype=np.float32)
+# (the capper's 'tube' tcp, mobisys.capper_tube_pos: the camera's
+# (253.5, -44.75) mm, a tube home in the store, its cap's top, at 87 mm).
+# Every pose ON the capper below is that tcp + an offset (world axes: the
+# capper stands unrotated), so they move with it. The offsets are the poses
+# tuned on the robot before the capper went up 25 mm on its block (2026-11),
+# when that cap top was at 62 mm
+TUBE_TCP = capper_tube_pos()
+
+
+def on_capper(dx, dy, dz):
+    """The capper's 'tube' tcp + (dx, dy, dz) m, world axes."""
+    return (TUBE_TCP + np.array([dx, dy, dz], dtype=np.float32)).astype(
+        np.float32)
+
+
+HOLE_XY = TUBE_TCP[:2]
+DROP_POS = on_capper(0.0, 0.0, 0.090)       # 177 mm
 # straight down from the drop point, the tube held: it goes INTO the store
-# instead of being dropped from the air (let go at 87 mm)
+# instead of being dropped from the air (let go at 112 mm, its cap 25 over
+# home: the push seats it)
 PLACE_DESCEND = 0.065
-# after letting go, straight up this far (to 100 mm, level with PUSH_POS)
+# after letting go, straight up this far (to 125 mm, level with PUSH_POS)
 RELEASE_RISE = 0.013
 # the hand's orientation arriving at the drop point, the long tab at -y:
 # its x towards the long tab = -y (the grip 'towards') or away = +y
@@ -78,21 +95,23 @@ def placing_of(flip):
 # starts over the BACK of the placed tube, just above it
 # (tuned on the robot with grasp_center at the gripper's axis: +(1, -3) mm
 # keeps the fingers where they were, grasp_center now measured off the axis)
-PUSH_POS = np.array([0.251, -0.0375, 0.1], dtype=np.float32)
+PUSH_POS = on_capper(-0.0025, 0.00725, 0.038)     # (251, -37.5, 125) mm
 # the from -x orientation: the blade line across the push
 PUSH_ROTMAT = layout.TCP_ROTMAT_FROM_NX
 # straight down, gripper closed: the fingertips (4.8 mm below grasp_center)
-# to ~68 mm, where the old fingers' push ended -- 32 mm (4.8 deeper) tripped
+# to ~93 mm (68 before the capper went up), where the old fingers' push
+# ended -- 32 mm (4.8 deeper) tripped
 # J2 / J3 collision detection at the end of the push
 PUSH_DESCEND = 0.027
 
 # ---- pop: fixed -- the lever that pries the tube back out of the capper ----
 # (+(1, -3) mm, as PUSH_POS: the fingers where they were tuned)
-POP_POS = np.array([0.251, -0.103, 0.100], dtype=np.float32)
+POP_POS = on_capper(-0.0025, -0.05825, 0.038)     # (251, -103, 125) mm
 POP_ROTMAT = layout.TCP_ROTMAT_FROM_NX
 # straight down onto the lever until the FINGERTIPS are at this height
-# (world z, absolute -- 25.2 mm did not lift the tube out)
-POP_TIP_Z = 0.0215
+# (25.2 mm -- 50.2 now -- did not lift the tube out; 46.5 lifted it but the
+# lever bottomed out first: J2 collision detection at 47.2, 2026-11-17)
+POP_TIP_Z = float(TUBE_TCP[2]) - 0.039         # 48.0 mm
 # the fingertips are this far below grasp_center (the finger meshes reach
 # 99.8 mm from the gripper base, grasp_center is at 95)
 FINGERTIP_BELOW_GC = 0.0048
@@ -103,12 +122,13 @@ POP_DIST = float(POP_POS[2] - (POP_TIP_Z + FINGERTIP_BELOW_GC))
 POP_FAST_DIST = 0.05
 
 # ---- re-pick: fixed -- the popped tube, picked back up out of the store ----
-REPICK_POS = np.array([*HOLE_XY, 0.140], dtype=np.float32)
+REPICK_POS = on_capper(0.0, 0.0, 0.078)         # 165 mm
 # from above by the cap, as in the rack: the long tab is at -y now, so the
 # fingers close along x -- the hand's y along world x
 REPICK_ROTMAT = layout.TCP_ROTMAT_FROM_NY
 # straight down to the cap, gripper open: grasp_center to the popped tube's
-# cap top (~83 mm, measured), as in the rack (62 mm) -- 53 mm (87) gripped
+# cap top (~108 mm: 83 measured before the capper went up), as in the
+# rack (62 mm) -- 53 mm gripped
 # above it and missed
 REPICK_DESCEND = 0.057
 

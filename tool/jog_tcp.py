@@ -55,10 +55,11 @@ import threading
 
 import numpy as np
 
-from one.drivers.cobotta import BCapError, Cobotta, CobottaMotion
+from one.drivers.cobotta import BCapError, CobottaMotion
 import one.utils.math as oum
 import one.utils.constant as ouc
 
+from coripps.drivers.cobotta_read import read_qs
 from coripps.tool import pose_sequence as pseq
 
 
@@ -207,15 +208,6 @@ def align_path(mech, tcp, qs):
             return None, why, angle, x_dir
         path.append(step[-1])
     return np.asarray(path, dtype=np.float32), '', angle, x_dir
-
-
-def read_qs(host, ndof):
-    try:
-        with Cobotta(host) as reader:
-            return reader.joint_angles(ndof=ndof)
-    except (OSError, BCapError) as exc:
-        print(f'{host}: cannot read ({exc}) -- shown at its sim pose')
-        return None
 
 
 def main(robot='picker', step=0.001):

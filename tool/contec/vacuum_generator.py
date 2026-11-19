@@ -5,7 +5,7 @@ Enter between steps and printing the read-back state. The last two steps
 switch suck -> blow directly to check the interlock. Ctrl+C at any point
 switches everything off.
 
-    py -3.12 coripps/_test/test_contec_vacuum_generator.py
+    py -3.12 coripps/tool/contec/vacuum_generator.py
 """
 
 from coripps.drivers.contec_dio import ContecDIO

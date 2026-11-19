@@ -289,10 +289,14 @@ class PickSession:
         """``[(part, waypoints), ...]`` from joints ``start`` to ``goal``:
         'up' / 'across' / 'down' as :meth:`transfer_to` describes (an 'up'
         or 'down' only where that end is not clear already); None when it
-        cannot be. The transit model is rebuilt first: the other arm where
-        it is now."""
+        cannot be. The transit model takes the other arm where it is now
+        first."""
         ctx = self._transit[held]
-        ctx.collider.refresh()
+        # the other arm where it is now: its joints written into the model
+        col = ctx.collider
+        for m in col.scene.mecbas:
+            if m not in col.actors:
+                col.set_mecba_qpos(m, m.qs)
         for c in self._transit.values():
             c.clear_cache()
 

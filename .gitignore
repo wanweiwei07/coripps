@@ -12,3 +12,9 @@ vision/**/survey_images/
 vision/**/observe/
 vision/picker_rgb/samples/
 *.npy
+
+# rendered simulation videos (main_sim --video)
+/documents/videos/
+
+# reference materials (not tracked)
+/documents/materials/

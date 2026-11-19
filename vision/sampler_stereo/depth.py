@@ -21,9 +21,13 @@ from coripps.vision.sampler_stereo import calib
 RECT_F = 300.0                  # px, rectified focal (~ the fisheyes', 298)
 DEPTH_MIN, DEPTH_MAX = 0.05, 0.5    # m, kept depth range
 # leaf_depth: a region's own disparity found whole first (score at least
-# LEAF_MIN_SCORE, searched up to LEAF_MAX_DISP, LEAF_ROWS rows either way),
+# LEAF_MIN_SCORE, searched up to LEAF_MAX_DISP, LEAF_ROWS rows either way)
+# -- or, when its texture does not match (a smooth leaf; up close, the
+# ground in its box at another disparity), by its outline: moved along the
+# rows onto the right eye's masks, the best IoU at least LEAF_MIN_IOU --
 # then per pixel only within LEAF_DISP_SPAN of it
 LEAF_MIN_SCORE = 0.7
+LEAF_MIN_IOU = 0.6
 LEAF_MAX_DISP = 128             # px
 LEAF_ROWS = 2                   # px
 LEAF_DISP_SPAN = 16             # px, either way (2x: a multiple of 16)
@@ -105,15 +109,47 @@ def rgbd(left, right, rect, color=None, rows=None):
     return rect_l, z, rect.K.copy(), rows, pair
 
 
-def leaf_depth(rect_l, rect_r, rect, mask):
+def outline_disparity(mask, right_masks, a_left=True):
+    """``(disparity px, IoU)`` of a left region ``mask`` by its outline:
+    moved along the rows by 0 .. LEAF_MAX_DISP px (the right eye sees it
+    further left, ``a_left``), the shift whose IoU with one of
+    ``right_masks`` (the right's regions, rows aligned) is best; ``(None,
+    0.0)`` when there are none."""
+    ys, xs = np.nonzero(mask)
+    if not len(ys) or not len(right_masks):
+        return None, 0.0
+    y0, y1 = ys.min(), ys.max() + 1
+    m = mask[y0:y1]
+    n = int(m.sum())
+    best, best_d = 0.0, None
+    for r in right_masks:
+        r = r[y0:y1]
+        rn = int(r.sum())
+        if not rn:
+            continue
+        w = m.shape[1]
+        for d in range(LEAF_MAX_DISP + 1):
+            if a_left:                  # left u -> right u - d
+                inter = int((m[:, d:] & r[:, :w - d]).sum())
+            else:
+                inter = int((m[:, :w - d] & r[:, d:]).sum())
+            iou = inter / (n + rn - inter)
+            if iou > best:
+                best, best_d = iou, d
+    return best_d, best
+
+
+def leaf_depth(rect_l, rect_r, rect, mask, right_masks=None):
     """Depth (m, 0 off it) of one region of the rectified left -- a leaf's
     mask -- from the pair as matched (:func:`rgbd`'s): its disparity found
-    whole first (its box template-matched along its rows in the right),
-    then SGBM per pixel only within LEAF_DISP_SPAN of that, so the ground
-    behind a thin leaf cannot pull it away (whole-picture SGBM put such a
-    leaf at the board 90 mm below), and of those only the pixels within
-    LEAF_KEEP of it kept (the rest stuck at the span's edge: mismatches).
-    None when the whole match is poor."""
+    whole first (its box template-matched along its rows in the right; when
+    that scores under LEAF_MIN_SCORE, its outline onto ``right_masks``, the
+    right eye's leaves -- :func:`outline_disparity`), then SGBM per pixel
+    only within LEAF_DISP_SPAN of that, so the ground behind a thin leaf
+    cannot pull it away (whole-picture SGBM put such a leaf at the board
+    90 mm below), and of those only the pixels within LEAF_KEEP of it kept
+    (the rest stuck at the span's edge: mismatches). None when neither
+    whole match holds."""
     ys, xs = np.nonzero(mask)
     if not len(ys):
         return None
@@ -131,9 +167,14 @@ def leaf_depth(rect_l, rect_r, rect, mask):
     score = cv2.matchTemplate(grey_r[lo:hi, wx0:wx1], grey_l[y0:y1, x0:x1],
                               cv2.TM_CCOEFF_NORMED)
     _, best, _, (bx, _) = cv2.minMaxLoc(score)
-    if best < LEAF_MIN_SCORE:
-        return None
-    d0 = abs(wx0 + bx - x0)
+    if best >= LEAF_MIN_SCORE:
+        d0 = abs(wx0 + bx - x0)
+    else:
+        d0, iou = outline_disparity(mask, right_masks or [], rect.a_left)
+        if d0 is None or iou < LEAF_MIN_IOU:
+            return None
+        print(f'  texture {best:.2f} < {LEAF_MIN_SCORE} -- by its outline: '
+              f'IoU {iou:.2f}, {d0} px')
     band = slice(max(y0 - LEAF_BAND_PAD, 0), min(y1 + LEAF_BAND_PAD, h))
     lo_d = max(d0 - LEAF_DISP_SPAN, 0)
 
@@ -223,7 +264,7 @@ def world():
     from one.drivers.cobotta import BCapError
     from coripps.robots.mobisys import mobisys
     from coripps.tool.home_sampler import _SAMPLER_HOST, _PICKER_HOST
-    from coripps.vision.d405.check_pointcloud import connect
+    from coripps.drivers.cobotta_read import connect
     from coripps.vision.sampler_stereo.camera import StereoCam
 
     rect = rectifier()

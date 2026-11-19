@@ -39,6 +39,7 @@ import numpy as np
 
 import one.geom.fitting as ogf
 
+from coripps.drivers.cobotta_read import read_qs
 from coripps.vision.sampler_rgb_sgl import calib
 from coripps.vision.sampler_rgb_sgl import capture_survey as cs
 from coripps.vision.sampler_rgb_sgl import reconstruct_survey as rs
@@ -252,19 +253,6 @@ def draw(image, leaves, rosette, chosen):
     return out
 
 
-def read_qs(host, label, ndof=6):
-    """Joint angles from a controller, or None (said why)."""
-    from one.drivers.cobotta import BCapError, Cobotta
-    try:
-        with Cobotta(host) as cobotta:
-            qs = cobotta.joint_angles(ndof=ndof)
-    except (OSError, BCapError) as exc:
-        print(f'{label}: cannot read {host} ({exc}) -- shown at its sim pose')
-        return None
-    print(f'{label}: {np.round(np.degrees(qs), 2)} deg')
-    return qs
-
-
 def show(leaves, cloud, chosen):
     import one.scene.scene_object_primitive as ossop
     import one.utils.constant as ouc
@@ -277,7 +265,7 @@ def show(leaves, cloud, chosen):
     mobisys_base, picker, sampler = mobisys()
     for robot, host, label in ((picker, _PICKER_HOST, 'picker'),
                                (sampler, _SAMPLER_HOST, 'sampler')):
-        qs = read_qs(host, label, robot.ndof)
+        qs = read_qs(host, robot.ndof, label)
         if qs is not None:
             robot.fk(qs=qs)
     mobisys_base.attach_to(base.scene)

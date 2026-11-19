@@ -3,7 +3,7 @@
 Waits for Enter, runs the cutter for ON_TIME seconds, then stops it and prints
 the read-back state. Ctrl+C at any point switches everything off.
 
-    py -3.12 coripps/_test/test_contec_ultrasonic_cutter.py
+    py -3.12 coripps/tool/contec/ultrasonic_cutter.py
 """
 
 import time

@@ -25,8 +25,9 @@ from one.vision.calibrate import handeye as che
 
 
 PORT = (3, 3)                  # hub port of the picker camera, on the hub
-                               # on port 3 (the sampler's right one is
-                               # also on a port 3: cameras.index_of)
+                               # on the main hub's port 3 (the sampler's
+                               # right one is also on a port 3:
+                               # cameras.index_of); not the PC's port
 LABEL = 'picker camera'
 _HERE = os.path.dirname(os.path.abspath(__file__))
 # coripps/config (this file is coripps/vision/<camera>/calib.py)

@@ -70,6 +70,10 @@ from one.drivers.cobotta import BCapError, Cobotta
 import one.motion.probabilistic.rrt as ompr
 
 import coripps.tool.tube.pick_cap_store as pcs
+import coripps.end_effectors.xh430_capper.exec as xcap
+import coripps.end_effectors.xh430_capper.xh430_capper as xcm
+import coripps.end_effectors.xh430_gripper.xh430_gripper as xgr
+import coripps.tool.tube.layout_pick as layout_pick
 from coripps.end_effectors.xh430_capper.exec import (XH430CapperExec,
                                                      DynamixelError)
 from coripps.robots.leaf_sampler import LeafSampler
@@ -90,6 +94,7 @@ HOLD_FRAMES = 30                            # held at the end of the loop
 FOLLOW_INTERVAL = 0.1                       # s, the real arms on screen
 PLAY_STEP = np.deg2rad(1.0)                 # rad per drawn frame
 SIM_TAB_DEG = 0.0                           # the simulation's cap long tab
+SIM_CAP_WIDTH = 0.022                       # the gripper closed on a cap (m)
 _SAMPLER_HOST = '192.168.0.101'
 _PICKER_HOST = '192.168.0.102'
 READ_TIMEOUT = 10.0                         # s, a kept joint reader
@@ -158,11 +163,13 @@ def close_readers():
 
 
 def refresh_other(shared, pln_ctx, other_cls, host):
-    """Put the other robot at its current joints in this collision model."""
+    """Put the other robot at its current joints in this collision model:
+    its joints written into the compiled model (``set_mecba_qpos``, ~20 us)
+    -- no rebuild, it is in there with its joints already."""
     other = next(m for m in pln_ctx.collider.scene.mecbas
                  if isinstance(m, other_cls))
     other.fk(qs=shared.other_qs(host, other.ndof))
-    pln_ctx.collider.refresh()
+    pln_ctx.collider.set_mecba_qpos(other, other.qs)
     pln_ctx.clear_cache()
 
 
@@ -357,14 +364,23 @@ def run_both(shared, picker, capper, plan, sampler):
 
 # -- the simulation -------------------------------------------------------------
 class _SimCapper:
-    def __init__(self, log):
-        self.log = log
+    """The capper in the simulation: each move logged, and noted as the
+    picker frame it came at (the picker's thread drives it), for the viewer
+    to turn the model's finger (``xh430_capper.MODES``)."""
+
+    def __init__(self, log, track, frames):
+        self.log, self.track, self.frames = log, track, frames
+        self.mode = 'home'
 
     def set_opening(self, mode):
         self.log.append(f'capper {mode}')
+        self.mode = mode
+        self.track.append((len(self.frames['p']), mode))
 
     def servo_deg(self):
-        return float('nan')
+        cfg = xcap.CONFIG
+        return {'home': cfg.home_deg, 'stopper': cfg.stopper_deg,
+                'open': cfg.open_deg, 'close': cfg.close_deg}[self.mode]
 
 
 class _SimCutter:
@@ -423,6 +439,13 @@ def simulate(picker, sampler, plan):
     frames = {'p': [np.asarray(sim['p'], np.float32)],
               's': [np.asarray(sim['s'], np.float32)]}
     marks, log = {}, []
+    track = [(0, 'home')]               # the capper: (picker frame, mode)
+    grips = [(0, 'open')]               # the gripper: (picker frame, verb)
+
+    def p_gripper(verb):
+        log.append(f'gripper {verb}')
+        grips.append((len(frames['p']), verb))
+        return True
 
     def p_play(name, waypoints, speed=None):
         frames['p'] += densify(waypoints, picker.pln_ctx)[1:]
@@ -440,8 +463,8 @@ def simulate(picker, sampler, plan):
     patches = [(picker, 'real_qs', lambda: picker.pln_ctx.enforce_bounds(
                     sim['p'].copy())),
                (picker, 'play', p_play),
-               (picker, 'work_gripper',
-                lambda verb: log.append(f'gripper {verb}') or True),
+               (picker, 'work_gripper', p_gripper),
+               (picker, 'grip_tube', lambda: p_gripper('grip')),
                (picker, 'look', p_look),
                (sampler, 'qs_now', lambda: sampler.pln_ctx.enforce_bounds(
                    sim['s'].copy())),
@@ -459,7 +482,8 @@ def simulate(picker, sampler, plan):
             name, len(frames['p' if name.startswith('picker') else 's'])))
     try:
         print('\n==== simulation ====')
-        threads, results = run_both(shared, picker, _SimCapper(log), plan,
+        threads, results = run_both(shared, picker,
+                                    _SimCapper(log, track, frames), plan,
                                     sampler)
         for t in threads:
             t.join()
@@ -474,55 +498,149 @@ def simulate(picker, sampler, plan):
                             'FAILED -- nothing can be run'))
     print('  ' + ', '.join(log))
     fp, fs = frames['p'], frames['s']
+    # the capper's finger and the gripper at every picker frame: the last
+    # mode / verb by then
+    def at_frames(marks):
+        out, k = [], 0
+        for i in range(len(fp)):
+            while k + 1 < len(marks) and marks[k + 1][0] <= i:
+                k += 1
+            out.append(marks[k][1])
+        return out
+    fc = [xcm.MODES[m] for m in at_frames(track)]
+    fg = at_frames(grips)
     p0, s0 = marks.get('picker_0', len(fp)), marks.get('sampler_0', len(fs))
     pa, pd = marks.get('picker_a', len(fp)), marks.get('picker_d', len(fp))
     sb = marks.get('sampler_b', len(fs))
     sc = marks.get('sampler_c', len(fs))
-    phases = [(fp[:p0], fs[:s0]),               # 0: to the start
-              (fp[p0 - 1:pa], fs[s0 - 1:sb]),   # A
-              ([fp[pa - 1]], fs[sb - 1:sc]),    # B
-              (fp[pd - 1:] if pd < len(fp) else [fp[-1]], fs[sc - 1:])]  # C
+    def cut(a, b):          # the picker's tracks over picker frames a:b
+        return fp[a:b], fc[a:b], fg[a:b]
+    pick = [cut(0, p0), cut(p0 - 1, pa), cut(pa - 1, pa),
+            cut(pd - 1, None) if pd < len(fp) else cut(-1, None)]
+    samp = [fs[:s0], fs[s0 - 1:sb], fs[sb - 1:sc], fs[sc - 1:]]
+    # 0: to the start, A, B, C: (picker, sampler, capper, gripper) frames
+    phases = [(p[0], f, p[1], p[2]) for p, f in zip(pick, samp)]
     return phases, ok
 
 
 # -- the viewer -------------------------------------------------------------
 def timeline(phases):
-    """Per animation frame ``(picker qs, sampler qs)``: the phases one
-    after another, both robots in step inside a phase."""
+    """Per animation frame ``(picker qs, sampler qs, capper q, gripper
+    verb)``: the phases one after another, both robots in step inside a
+    phase (the capper and the gripper with the picker)."""
     out = []
-    for fp, fs in phases:
+    for fp, fs, fc, fg in phases:
         n = max(len(fp), len(fs))
-        out += [(fp[min(k, len(fp) - 1)], fs[min(k, len(fs) - 1)])
+        out += [(fp[min(k, len(fp) - 1)], fs[min(k, len(fs) - 1)],
+                 fc[min(k, len(fc) - 1)], fg[min(k, len(fg) - 1)])
                 for k in range(n)]
     return out + [out[-1]] * HOLD_FRAMES
 
 
-def show(phases, ok, real):
-    """Loop the simulation; 'g' starts ``real()`` (when ``ok``) and the
-    viewer follows the real arms; 'q' or closing stops it."""
+def gripper_width(gripper, verb):
+    """The sim gripper's opening (m) after ``verb`` (``work_gripper``'s, or
+    'grip': closed on a cap)."""
+    lo, hi = gripper.jaw_range
+    width = {'open': gripper.opening_from_angle(xgr.OPEN_TRAVEL),
+             'camera': gripper.opening_from_angle(xgr.CAMERA_OPEN_TRAVEL),
+             'pick': layout_pick.PICK_OPEN_WIDTH,
+             'grip': SIM_CAP_WIDTH}.get(verb, lo)
+    return float(np.clip(width, lo, hi))
+
+
+# the viewer's camera: from the front (-y), where the cell is filmed from,
+# turned a little to its left (-x), low and close: the two hands, the
+# rack and the capper
+CAM_POS = (-0.04, -0.50, 0.34)
+CAM_LOOKAT = (0.17, 0.02, 0.13)
+
+
+class _Stage:
+    """The cell as the viewer and the recorder draw it: the platform (its
+    capper), both robots and the tubes, put at one ``timeline`` frame by
+    :meth:`pose`."""
+
+    def __init__(self, base, tube_tfs=None):
+        from coripps.robots.mobisys import mobisys
+        self.base = base
+        self.platform, self.picker, self.sampler = mobisys()
+        self.platform.attach_to(base.scene)
+        self.picker.attach_to(base.scene)
+        self.picker.gripper.attach_to(base.scene)
+        self.sampler.attach_to(base.scene)
+        self.tube_tfs = tube_tfs
+        self.tubes, self.shown = [], []     # tube models, as many as needed
+        if tube_tfs is not None:
+            import one.scene.scene_object as osso
+            import one.utils.constant as ouc
+            self.tube_model = osso.SceneObject.from_file(
+                pcs.pkm._TUBE_PATH, collision_type=None,
+                rgb=ouc.ExtendedColor.SILVER)
+
+    def _draw_tubes(self, tfs):
+        while len(self.tubes) < len(tfs):
+            self.tubes.append(self.tube_model.clone())
+            self.shown.append(None)
+        for k, tube in enumerate(self.tubes):
+            tf = tfs[k] if k < len(tfs) else None
+            if tf is self.shown[k]:
+                continue                # the same pose object: unchanged
+            if tf is None:
+                tube.detach_from(self.base.scene)
+            else:
+                if self.shown[k] is None:
+                    tube.attach_to(self.base.scene)
+                tube.set_pos_rotmat(pos=tf[:3, 3], rotmat=tf[:3, :3])
+            self.shown[k] = tf
+
+    def pose(self, frame, i):
+        """Everything at ``frame`` (a ``timeline`` entry), tubes at
+        ``tube_tfs[i]``."""
+        p_qs, s_qs, c_q, verb = frame
+        self.picker.fk(qs=p_qs)
+        self.sampler.fk(qs=s_qs)
+        self.platform.capper.fk(qs=[c_q])
+        self.picker.gripper.set_opening(
+            gripper_width(self.picker.gripper, verb))
+        if self.tube_tfs is not None:
+            self._draw_tubes(self.tube_tfs[min(i, len(self.tube_tfs) - 1)])
+        self.base.scene.dirty = True
+
+
+def show(phases, ok, real, capper=None, tube_tfs=None, speed=1,
+         growing=None):
+    """Loop the simulation; 'g' starts ``real()`` (when ``ok``; ``real``
+    None: a simulation only) and the viewer follows the real arms -- and the
+    real capper (``capper``, its exec: the angle its last move ended at);
+    'q' or closing stops it. ``tube_tfs``: per ``timeline`` frame, the poses
+    (4x4, world) of the tubes to draw there. ``speed``: frames advanced per
+    drawn frame (a faster replay). ``phases`` (and ``tube_tfs``) may still
+    grow while it runs -- another thread planning more -- the loop takes
+    them in as they come; while ``growing()`` is True it waits at the end
+    for them instead of starting over."""
     from pyglet.window import key
     import one.viewer.world as ovw
-    from coripps.robots.mobisys import mobisys
 
     frames = timeline(phases)
-    base = ovw.World(cam_pos=(1.1, 0.5, 0.8),
-                     cam_lookat_pos=(0.30, -0.10, 0.10))
-    mobisys_base, picker, sampler = mobisys()
-    mobisys_base.attach_to(base.scene)
-    picker.attach_to(base.scene)
-    picker.gripper.attach_to(base.scene)
-    sampler.attach_to(base.scene)
+    seen = {'phases': len(phases)}
+    base = ovw.World(cam_pos=CAM_POS, cam_lookat_pos=CAM_LOOKAT)
+    stage = _Stage(base, tube_tfs)
     state = {'i': 0, 'running': None}
     print("\nviewer: the simulation loops -- " +
-          ("'g' in the window runs it on the real cell, " if ok else
-           'it FAILED, nothing can be run; ') + "'q' / closing stops")
+          ('closing the window ends it' if real is None else
+           ("'g' in the window runs it on the real cell, " if ok else
+            'it FAILED, nothing can be run; ') + "'q' / closing stops"))
 
     def follow():
-        for robot, host in ((picker, _PICKER_HOST), (sampler, _SAMPLER_HOST)):
+        for robot, host in ((stage.picker, _PICKER_HOST),
+                            (stage.sampler, _SAMPLER_HOST)):
             try:
                 robot.fk(qs=read_qs(host, robot.ndof))
             except (OSError, BCapError):
                 pass
+        deg = None if capper is None else capper.last_deg
+        if deg is not None:
+            stage.platform.capper.set_dial(deg)
 
     def tick(dt):
         im = base.input_manager
@@ -531,19 +649,68 @@ def show(phases, ok, real):
             print('q: stopping both before their next step')
             state['running'].stop.set()
         if state['running'] is None:
-            if go and ok:
+            if go and ok and real is not None:
                 state['running'] = real()
                 base.schedule_interval(lambda dt: follow(),
                                        interval=FOLLOW_INTERVAL)
                 return
-            p_qs, s_qs = frames[state['i']]
-            picker.fk(qs=p_qs)
-            sampler.fk(qs=s_qs)
-            state['i'] = (state['i'] + 1) % len(frames)
+            if len(phases) != seen['phases']:   # more planned meanwhile
+                seen['phases'] = len(phases)
+                frames[:] = timeline(phases)
+            stage.pose(frames[state['i']], state['i'])
+            nxt = state['i'] + speed
+            if nxt >= len(frames) and growing is not None and growing():
+                nxt = len(frames) - 1      # wait for the next cycle
+            state['i'] = nxt % len(frames)
 
     base.schedule_interval(tick, interval=PLAY_INTERVAL)
     base.run()
     return state['running']
+
+
+def record(phases, path, tube_tfs=None, speed=1, fps=30, size=(1280, 720),
+           cam_pos=CAM_POS, cam_lookat=CAM_LOOKAT):
+    """The simulation's ``phases`` rendered off screen into the video
+    ``path`` (mp4, ``fps``), every ``speed``-th ``timeline`` frame (a faster
+    replay; a callable: ``speed(i)`` frames on from frame ``i``), ``size``
+    pixels, from ``cam_pos``. Returns the number of video frames."""
+    import imageio.v2 as imageio
+    import pyglet.gl as gl
+    import one.viewer.world as ovw
+    import one.viewer.render_target as ovrt
+
+    frames = timeline(phases)
+    w, h = size
+    base = ovw.World(cam_pos=cam_pos, cam_lookat_pos=cam_lookat,
+                     win_size=size, visible=False)
+    stage = _Stage(base, tube_tfs)
+    base.switch_to()
+    target = ovrt.RenderTarget(w, h, samples=4)
+    pixels = (gl.GLubyte * (w * h * 3))()
+    gl.glPixelStorei(gl.GL_PACK_ALIGNMENT, 1)
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    writer = imageio.get_writer(path, fps=fps, codec='libx264', quality=8,
+                                macro_block_size=8)
+    step = speed if callable(speed) else (lambda i: speed)
+    n, i = 0, 0
+    while i < len(frames):
+        stage.pose(frames[i], i)
+        target.bind()
+        base.render.draw(base.scene)
+        target.unbind()
+        gl.glBindFramebuffer(gl.GL_READ_FRAMEBUFFER, target.fbo)
+        gl.glReadPixels(0, 0, w, h, gl.GL_RGB, gl.GL_UNSIGNED_BYTE, pixels)
+        gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, 0)
+        writer.append_data(np.frombuffer(pixels, dtype=np.uint8)
+                           .reshape(h, w, 3)[::-1])
+        n += 1
+        i += max(1, int(step(i)))
+        if n % 500 == 0:
+            print(f'video: {n} frames ({i}/{len(frames)})', flush=True)
+    writer.close()
+    base.close()
+    print(f'video: {path} -- {n} frames, {n / fps:.0f} s')
+    return n
 
 
 def plan_picker(picker):
@@ -595,7 +762,7 @@ def main(tube=pcs.TUBE_INDEX):
                                                       plan, sampler)
             return shared
 
-        shared = show(phases, ok, real)
+        shared = show(phases, ok, real, capper)
         if shared is None:
             return False
         shared.stop.set()               # the window is closed: stop both

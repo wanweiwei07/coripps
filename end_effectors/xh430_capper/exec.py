@@ -1,8 +1,9 @@
 """Drive the REAL XH430 tube capper -- opens and presses shut a tube cap.
 
-One Dynamixel XH430 (RS485, Protocol 2.0), fixed in the cell. There is no sim
-model: the capper is only ever driven, never planned around, so everything is
-in the servo's own dial degrees (0..360 over one turn):
+One Dynamixel XH430 (RS485, Protocol 2.0), fixed in the cell. Everything here
+is in the servo's own dial degrees (0..360 over one turn); the sim model
+(``xh430_capper.py``: the finger as a joint, q = dial - 180) reads its
+positions from :data:`CONFIG`:
 
 * HOME is 180 deg -- parked, waiting for the picker to place a tube.
 * STOPPER is 150 deg.
@@ -89,6 +90,10 @@ class XH430CapperExec:
         self.cfg = cfg
         self.dxl = Dynamixel(usb_serial=cfg.usb_serial, baudrate=cfg.baud,
                              dxl_id=cfg.dxl_id)
+        # the dial angle the last move ended at (its goal while it runs):
+        # read by a viewer without touching the port (xh430_capper's
+        # set_dial); None before the first move
+        self.last_deg = None
 
     # ---- connection -------------------------------------------------------
     def connect(self, setup=True):
@@ -156,8 +161,10 @@ class XH430CapperExec:
     def _move_to_servo_deg(self, deg, wait=True):
         self.dxl.write('goal_current', self.cfg.goal_current)
         self.dxl.write('goal_position', self.dxl.deg_to_ticks(deg))
+        self.last_deg = deg
         if wait:
-            self._settle()
+            ticks, _ = self._settle()
+            self.last_deg = self.dxl.ticks_to_deg(ticks)
         return deg
 
     def _settle(self):

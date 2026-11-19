@@ -30,6 +30,7 @@ import numpy as np
 import one.motion.probabilistic.rrt as ompr
 from one.drivers.cobotta import BCapError, Cobotta, CobottaMotion
 
+from coripps.drivers.cobotta_read import read_qs
 from coripps.tool.home_sampler import _build, _SAMPLER_HOST, _PICKER_HOST
 from coripps.vision.sampler_rgb_sgl import calib
 from coripps.vision.sampler_rgb_sgl import leaf_frames as lf
@@ -97,17 +98,6 @@ def densify(path):
         n = max(int(np.ceil(np.max(np.abs(b - a)) / PLAY_STEP)), 1)
         frames += [a + (b - a) * k / n for k in range(1, n + 1)]
     return frames
-
-
-def read_qs(host, label, ndof=6):
-    try:
-        with Cobotta(host) as cobotta:
-            qs = cobotta.joint_angles(ndof=ndof)
-    except (OSError, BCapError) as exc:
-        print(f'{label}: cannot read {host} ({exc})')
-        return None
-    print(f'{label}: {np.round(np.degrees(qs), 2)} deg')
-    return qs
 
 
 def execute(path, status):
@@ -223,7 +213,7 @@ def main():
           f'({APPROACH_OFFSET * 1000:.0f} mm off the leaf face)')
 
     _, _, sampler, pln_ctx = _build()   # reads and freezes the picker
-    start = read_qs(_SAMPLER_HOST, 'sampler', sampler.ndof)
+    start = read_qs(_SAMPLER_HOST, sampler.ndof, 'sampler')
     if start is None:
         return False
     start = pln_ctx.enforce_bounds(start)
@@ -244,7 +234,7 @@ def main():
         return False
     frames = densify(path)
     print(f'animation: {len(frames)} frames')
-    show(frames, path, leaf['tf'], cloud, read_qs(_PICKER_HOST, 'picker'))
+    show(frames, path, leaf['tf'], cloud, read_qs(_PICKER_HOST, label='picker'))
     return True
 
 

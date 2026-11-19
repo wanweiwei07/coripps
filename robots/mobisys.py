@@ -13,8 +13,8 @@ import one.viewer.world as ovw
 
 from coripps.robots.leaf_sampler import LeafSampler
 from coripps.robots.tube_picker import TubePicker
-from coripps.end_effectors.xh430_capper.xh430_capper import (XH430Capper,
-                                                             HINGE_POS)
+from coripps.end_effectors.xh430_capper.xh430_capper import (
+    XH430Capper, HINGE_POS, TUBE_POS, TRANSIT_BOXES)
 
 
 _MODEL_DIR = os.path.join(
@@ -36,17 +36,29 @@ _TUBE_PICKER_ROTMAT = np.eye(3, dtype=np.float32)
 _TUBE_PICKER_POS = np.array([0.0, 0.0, 0.005], dtype=np.float32)
 _LEAF_SAMPLER_ROTMAT = oum.rotmat_from_axangle(ouc.StandardAxis.Z, -np.pi / 2.0)
 _LEAF_SAMPLER_POS = np.array([0.42, 0.031, 0.005], dtype=np.float32)
+# the capper's frame (its hinge) on the platform
+_CAPPER_POS = (_BASE_POS + _BASE_ROTMAT @ HINGE_POS).astype(np.float32)
+
+
+CAPPER_BOXES = tuple(
+    (tuple((_CAPPER_POS + np.asarray(lo)).tolist()),
+     tuple((_CAPPER_POS + np.asarray(hi)).tolist()))
+    for lo, hi in TRANSIT_BOXES)
+
+
+def capper_tube_pos():
+    """The capper's 'tube' tcp in the world: a tube placed in it, its cap's
+    top on its axis -- as ``mobisys()[0].capper.tcp('tube')``, without
+    building the scene."""
+    return (_CAPPER_POS + _BASE_ROTMAT @ (TUBE_POS - HINGE_POS)).astype(
+        np.float32)
 
 # ---- the platform as the picker's transit obstacles -----------------------
 # for the picker's moves between places (the across of a transfer), not for
 # its straight moves into the rack or the capper: a plane over the tubes in
-# the rack (their caps' tops at 62 mm) and the capper as two boxes ((x, y, z)
-# min / max, m, world) -- under the plane its whole footprint, over it 80 mm
-# long, shortened on the -x side (the rack's): its model's top is at 113 mm,
-# the box's 120 is the margin
+# the rack (their caps' tops at 62 mm) and the capper as its TRANSIT_BOXES,
+# where it stands ((x, y, z) min / max, m, world)
 PLATFORM_PLANE_Z = 0.070
-CAPPER_BOXES = (((0.2225, -0.0825, 0.0), (0.3225, -0.0125, 0.070)),
-                ((0.2425, -0.0825, 0.070), (0.3225, -0.0125, 0.120)))
 
 
 class Platform(osso.SceneObject):
@@ -82,8 +94,7 @@ def mobisys():
                 os.path.join(_MODEL_DIR, name)), rgb=rgb, alpha=1.0),
             auto_make_collision=False)
     base_model.set_pos_rotmat(pos=_BASE_POS, rotmat=_BASE_ROTMAT)
-    base_model.capper = XH430Capper(pos=_BASE_POS + _BASE_ROTMAT @ HINGE_POS,
-                                    rotmat=_BASE_ROTMAT)
+    base_model.capper = XH430Capper(pos=_CAPPER_POS, rotmat=_BASE_ROTMAT)
 
     tube_picker = TubePicker(rotmat=_TUBE_PICKER_ROTMAT, pos=_TUBE_PICKER_POS)
     leaf_sampler = LeafSampler(
@@ -117,12 +128,6 @@ if __name__ == '__main__':
     robot.gripper.attach_to(world.scene)
     robot.gripper.toggle_tcp('grasp_center', color_mat=ouc.CoordColor.MYC)
     leaf_sampler.attach_to(world.scene)
-    leaf_sampler.toggle_tcp(
-        'd405',
-        length_scale=0.3,
-        radius_scale=0.5,
-        color_mat=ouc.CoordColor.MYC,
-    )
 
     builtins.world = world
     builtins.base = world

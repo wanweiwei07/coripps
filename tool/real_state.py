@@ -3,8 +3,9 @@ import numpy as np
 import one.utils.constant as ouc
 import one.scene.scene_object_primitive as ossop
 import one.viewer.world as ovw
-from one.drivers.cobotta import BCapError, Cobotta
+from one.drivers.cobotta import BCapError
 
+from coripps.drivers.cobotta_read import connect
 from coripps.robots.mobisys import mobisys
 
 
@@ -13,17 +14,6 @@ _TUBE_HANDLER_HOST = '192.168.0.102'
 _LEAF_SAMPLER_HOST = '192.168.0.101'
 _POLL_INTERVAL = 0.1
 _PRINT_THRESHOLD = np.deg2rad(0.1)
-
-
-def connect_cobotta(host, label):
-    """Connect to one controller; return None (and say so) when unreachable."""
-    try:
-        cobotta = Cobotta(host).connect()
-    except (OSError, BCapError) as exc:
-        print(f'{label}: cannot read {host} ({exc}) -- left at its sim pose')
-        return None
-    print(f'{label}: reading real state from {host}')
-    return cobotta
 
 
 def show_real_state():
@@ -37,24 +27,18 @@ def show_real_state():
     tube_picker.gripper.attach_to(base.scene)
     tube_picker.gripper.toggle_tcp('grasp_center', color_mat=ouc.CoordColor.MYC)
     leaf_sampler.attach_to(base.scene)
-    leaf_sampler.toggle_tcp(
-        'd405',
-        length_scale=0.3,
-        radius_scale=0.5,
-        color_mat=ouc.CoordColor.MYC,
-    )
 
     links = [
         {
             'label': 'tube_picker',
             'robot': tube_picker,
-            'cobotta': connect_cobotta(_TUBE_HANDLER_HOST, 'tube_picker'),
+            'cobotta': connect(_TUBE_HANDLER_HOST, 'tube_picker'),
             'last_qs': None,
         },
         {
             'label': 'leaf_sampler',
             'robot': leaf_sampler,
-            'cobotta': connect_cobotta(_LEAF_SAMPLER_HOST, 'leaf_sampler'),
+            'cobotta': connect(_LEAF_SAMPLER_HOST, 'leaf_sampler'),
             'last_qs': None,
         },
     ]

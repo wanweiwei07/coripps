@@ -15,6 +15,10 @@ the dial angles of ``exec.CONFIG`` (home 180, stopper 150, open 275, close
 75, pressed past it by press_overshoot_deg) map to q directly
 (:func:`q_of_dial`, :meth:`XH430Capper.set_mode`).
 
+One tcp, ``'tube'`` (:data:`TUBE_POS`): a tube placed in it, at its cap's
+top, z up its axis. For planning around it, :data:`TRANSIT_BOXES` (its meshes'
+hulls fill the store's hole).
+
 Meshes (``meshes/``): ``capper_base.stl`` in the platform frame (its 25 mm
 block included), ``capper_finger.stl`` in its CAD part's own frame -- placed
 by ``_FINGER_ROTMAT`` / ``_FINGER_POS``, found by matching it to the finger
@@ -28,6 +32,7 @@ import os
 import numpy as np
 
 import one.utils.constant as ouc
+import one.utils.math as oum
 import one.robots.base.mech_structure as orbms
 import one.robots.base.mech_base as orbmb
 
@@ -36,6 +41,22 @@ from coripps.end_effectors.xh430_capper.exec import CONFIG
 
 # the hinge, in the platform frame (the meshes'): this mechanism's origin
 HINGE_POS = np.array([0.2815, -0.03175, 0.09025], dtype=np.float32)
+# the tcp 'tube': a tube placed in the capper, at its cap's top on its axis,
+# z up the axis (platform frame). x, y: the store's hole as the picker's
+# camera found it (layout_cap.HOLE_XY); z: the hole's floor in
+# capper_base.stl (28 mm, a ray down the hole) + the tube's 59 mm
+# (models/tube.stl) -- where a tube let go there stands (layout_cap: 87)
+TUBE_POS = np.array([0.2535, -0.04475, 0.087], dtype=np.float32)
+# the capper as two boxes for planning around it ((x, y, z) min / max, m,
+# this mechanism's frame -- its hinge -- as AABBs: valid while it stands
+# unrotated): below 70 mm over the platform its whole footprint, above it
+# 80 mm long, shortened on the -x side (the rack's); its model's top is at
+# 113 mm, the boxes' 120 is the margin
+_BOXES_PLATFORM = (((0.2225, -0.0825, 0.0), (0.3225, -0.0125, 0.070)),
+                   ((0.2425, -0.0825, 0.070), (0.3225, -0.0125, 0.120)))
+TRANSIT_BOXES = tuple((tuple(np.subtract(lo, HINGE_POS).tolist()),
+                       tuple(np.subtract(hi, HINGE_POS).tolist()))
+                      for lo, hi in _BOXES_PLATFORM)
 # the dial angle the meshes show the finger at: q = 0
 ZERO_DIAL_DEG = 180.0
 # capper_finger.stl's frame -> the platform frame
@@ -102,6 +123,9 @@ class XH430Capper(orbmb.MechBase):
 
     def __init__(self, rotmat=None, pos=None, mode='home'):
         super().__init__(rotmat=rotmat, pos=pos, is_floating=False)
+        # on the base: it stays where it is whatever the finger does
+        self.add_tcp('tube', self.runtime_root_lnk,
+                     oum.tf_from_pos_rotmat(pos=TUBE_POS - HINGE_POS))
         self.set_mode(mode)
 
     def set_mode(self, mode):

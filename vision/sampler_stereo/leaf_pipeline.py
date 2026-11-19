@@ -143,11 +143,15 @@ class Eye:
         color, depth, K, self.rows, self.matched = sd.rgbd(
             *self.pair, self.rect, rows=self.rows)
         self.last_depth = depth
+        self.right_masks = None         # the right's leaves, by _found
         return color, depth, K
 
     def leaf_depth(self, mask):
-        """A region's own depth in the last frame (``depth.leaf_depth``)."""
-        return sd.leaf_depth(*self.matched, self.rect, mask)
+        """A region's own depth in the last frame (``depth.leaf_depth``;
+        by its outline when its texture does not match, once the right
+        eye's leaves are known)."""
+        return sd.leaf_depth(*self.matched, self.rect, mask,
+                             self.right_masks)
 
     def close(self):
         self.cam.close()
@@ -292,19 +296,19 @@ def search_goal(sampler, pln_ctx, tf_flange_cam, eye, near):
                     near)
 
 
-def observe_goal(sampler, pln_ctx, tf_flange_cam, eye, plant, near):
-    """Joints for the look at the leaves: the eye OBSERVE_HEIGHT over
+def observe_goal(sampler, pln_ctx, tf_flange_cam, eye, plant, near,
+                 height=OBSERVE_HEIGHT):
+    """Joints for the look at the leaves: the eye ``height`` over
     ``plant`` (:func:`find_plant`), the whole plant clear of the cutter;
     None when there is none (said why)."""
-    mask = tool_mask(sampler, tf_flange_cam, eye, OBSERVE_HEIGHT)
-    px = free_pixel(mask, plant['radius'] * eye.K[0, 0] / OBSERVE_HEIGHT,
-                    eye.K)
+    mask = tool_mask(sampler, tf_flange_cam, eye, height)
+    px = free_pixel(mask, plant['radius'] * eye.K[0, 0] / height, eye.K)
     if px is None:
         print(f"observe: a {plant['radius'] * 1000:.0f} mm plant does not "
               'fit in the picture beside the cutter')
         return None
     return eye_goal(sampler, pln_ctx, tf_flange_cam, plant['center'],
-                    OBSERVE_HEIGHT, px, eye.K, near)
+                    height, px, eye.K, near)
 
 
 def relook_goal(sampler, pln_ctx, tf_flange_cam, eye, leaf, plant_z, near,
@@ -460,6 +464,7 @@ def _found(eye, color, depth, K, cam_tf, segmenter, near=None):
     """``lv.leaf_frames``' ``(leaves, rosette)``, only the leaves the right
     eye sees alike (LEAF_BOTH_IOU); None when none."""
     right = right_leaves(eye, segmenter, near)
+    eye.right_masks = right
     found = lv.leaf_frames(color, depth, K, cam_tf, segmenter, near,
                            eye.leaf_depth)
     if found is None:

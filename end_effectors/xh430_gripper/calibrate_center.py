@@ -40,8 +40,9 @@ import numpy as np
 import one.utils.math as oum
 from one.drivers.cobotta import BCapError, CobottaMotion
 
+from coripps.drivers.cobotta_read import read_qs
 from coripps.tool import pose_sequence as pseq
-from coripps.tool.jog_tcp import (tcp_tf, jog_path, turn_path, read_qs,
+from coripps.tool.jog_tcp import (tcp_tf, jog_path, turn_path,
                                   _PICKER_HOST, _SAMPLER_HOST)
 import coripps.end_effectors.xh430_gripper.xh430_gripper as xg
 
