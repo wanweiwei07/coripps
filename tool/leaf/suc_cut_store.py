@@ -131,6 +131,9 @@ FREE_SPEED = 30.0               # search, observe, to the plant / capper --
                                 # low for the first runs
 NEAR_SPEED = 10.0               # straight moves at the plant and the tube
 STRAIGHT_STEP = lp.DESCENT_STEP
+# the arm found this far (deg) off where a path was planned from: the path
+# run from where it is, when that first stretch is free; further: stopped
+DRIFT_MAX_DEG = 3.0
 # the one look, near: the nozzle's tip this far over the plant's top (the
 # eye ~50 mm further up, behind it: ~70 mm, past the stereo's nearest
 # ~61 mm -- f 299 px x baseline 26 mm / LEAF_MAX_DISP 128 px) -- it sees the
@@ -242,10 +245,22 @@ class LeafSession:
 
     def run(self, path, speed, what):
         """Play a planned joint path from where the arm is."""
-        off = np.max(np.abs(self.qs_now() - path[0]))
+        now = self.qs_now()
+        offs = np.abs(now - path[0])
+        off = np.max(offs)
         if off > lp.ARRIVAL_TOLERANCE:
-            raise RuntimeError(f'{what}: the arm moved since planning '
-                               f'({np.degrees(off):.2f} deg)')
+            # a little (the arm settling, a joint pulled by its cable while
+            # the motors were off): from where it is, when that is free
+            j = int(np.argmax(offs)) + 1
+            nxt = path[1] if len(path) > 1 else path[0]
+            if (off <= np.deg2rad(DRIFT_MAX_DEG)
+                    and self.pln_ctx.is_motion_valid(now, nxt)):
+                print(f'{what}: the arm {np.degrees(off):.2f} deg off where '
+                      f'it was planned from (J{j}) -- going on from there')
+                path = [now] + list(path[1:])
+            else:
+                raise RuntimeError(f'{what}: the arm moved since planning '
+                                   f'({np.degrees(off):.2f} deg, J{j})')
         self.cobotta.enable(speed=speed)
         self.cobotta.move_path(path[1:] if len(path) > 1 else path)
 
