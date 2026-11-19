@@ -1,6 +1,7 @@
 __pycache__/
 *.py[cod]
 *.npz
+!vision/picker_rgb/cap_template.npz
 .vscode/
 .idea/
 /ir_data/
