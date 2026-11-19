@@ -71,7 +71,7 @@ NOMINAL_PLANT_Z = 0.055
 NOMINAL_PLANT_RADIUS = 0.035
 SEARCH_HEIGHT = 0.200
 # the eye OBSERVE_HEIGHT over the plant's top (m): the cutter's tube reaches
-# ~10 cm past the cameras, so its tip stays ~4 cm over it
+# ~5 cm past the cameras, so its tip stays ~9 cm over it
 OBSERVE_HEIGHT = 0.140
 # the plant's top: this percentile of its leaves' depth points' z
 PLANT_PCT = 90
@@ -84,7 +84,7 @@ PLANT_MARGIN_PX = 10
 MIN_TOOL_Z = 0.005              # m, mesh nearer the eye left out
 ROLL_STEP_DEG = 15
 # the second look, closer: the eye RELOOK_HEIGHT over the plant's top (the
-# cutter's tip ~2 cm over it), the leaf's C - J span plus LEAF_VIEW_MARGIN
+# cutter's tip ~7 cm over it), the leaf's C - J span plus LEAF_VIEW_MARGIN
 # each way clear of the cutter; the leaf found again within RELOOK_MAX_MOVE
 RELOOK_HEIGHT = 0.120
 LEAF_VIEW_MARGIN = 0.025                # m

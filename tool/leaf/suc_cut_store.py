@@ -7,7 +7,8 @@ blade, lift it, and put it into the tube in the capper.
         looking straight down
     2   find the plant: the one nearest SEARCH_XY, its size and height (no
         motion)
-    3   to the observation pose, near: LOOK_HEIGHT over the plant's top
+    3   to the observation pose, near: the nozzle's tip LOOK_CLEARANCE
+        over the plant's top
         (the whole plant and its pot in the picture), looking straight
         down, the plant clear of the cutter in the picture
     4   look, once: the leaves, a frame each, the leaf with the most room
@@ -129,9 +130,11 @@ FREE_SPEED = 30.0               # search, observe, to the plant / capper --
                                 # low for the first runs
 NEAR_SPEED = 10.0               # straight moves at the plant and the tube
 STRAIGHT_STEP = lp.DESCENT_STEP
-# the one look, near: the eye this far over the plant's top -- it sees the
+# the one look, near: the nozzle's tip this far over the plant's top (the
+# eye ~50 mm further up, behind it: ~70 mm, past the stereo's nearest
+# ~61 mm -- f 299 px x baseline 26 mm / LEAF_MAX_DISP 128 px) -- it sees the
 # whole plant and its pot from there; no look from afar to agree with
-LOOK_HEIGHT = lp.RELOOK_HEIGHT
+LOOK_CLEARANCE = 0.020
 # the chosen leaf looked at again, closer, before the take: the eye this far
 # over the plant's top, beside the cutter (at the approach the nozzle hides
 # the leaf, and 60 mm is past the stereo's disparity range)
@@ -296,15 +299,27 @@ class LeafSession:
                   f"{self.plant['plant_z'] * 1000:.1f} mm")
         return 'find the plant nearest the search point', run
 
+    def eye_behind_tip(self, qs):
+        """How far the eye sits behind the nozzle's tip along its axis
+        (m; the two look the same way)."""
+        self.sampler.fk(qs=qs)
+        tf = (np.linalg.inv(np.array(self.sampler.cutter.tcp('tcp').tf,
+                                     dtype=np.float64))
+              @ np.array(self.sampler.tcp('flange').tf, dtype=np.float64)
+              @ self.tf_flange_cam)
+        return float(-tf[2, 3])
+
     def s_observe(self):
         start = self.qs_now()
+        height = LOOK_CLEARANCE + self.eye_behind_tip(start)
         goal = lp.observe_goal(self.sampler, self.pln_ctx, self.tf_flange_cam,
-                               self.eye, self.plant, start, LOOK_HEIGHT)
+                               self.eye, self.plant, start, height)
         path = None if goal is None else lp.plan(self.pln_ctx, start, goal)
         if path is None:
             raise RuntimeError('observe: no collision-free pose / path')
-        return (f'to the observation pose: {LOOK_HEIGHT * 1000:.0f} mm '
-                f'over the plant ({len(path)} waypoints)',
+        return (f'to the observation pose: the nozzle '
+                f'{LOOK_CLEARANCE * 1000:.0f} mm over the plant (the eye '
+                f'{height * 1000:.0f} mm, {len(path)} waypoints)',
                 lambda: self.run(path, FREE_SPEED, 'observe'))
 
     def s_look(self):
